@@ -167,7 +167,7 @@ textarea.t.small{min-height:120px}
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.8';
+const APP_VERSION = '0.8.1';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -402,7 +402,7 @@ function chatView(cid){
     }
   });
   if (streaming){
-    h += `<div class="bubble ai" id="streamText">${S.stream.text ? fmt(S.stream.text) : '<span class="dots" aria-label="書いているところ"><i></i><i></i><i></i></span>'}</div>`;
+    h += `<div class="bubble ai" id="streamText">${streamShown() ? fmt(streamShown()) : '<span class="dots" aria-label="書いているところ"><i></i><i></i><i></i></span>'}</div>`;
   }
   if (c.cutOffer != null && msgs[c.cutOffer] && !streaming){
     h += `<div class="cutbox">会話が長くなってきたよ。${shortDate(ymd(new Date(msgs[c.cutOffer].ts)))}のこのあたりより前を、そろそろ送らないようにするね。残したいことがあったら、先に「覚えといて」って頼んでから切ってね。画面からは消えないし、探せば見つかるよ。
@@ -564,11 +564,16 @@ function layoutAnchor(scroll){
   const box = $('#msgs'), sp = $('#spacer');
   if (!box || !sp) return;
   const el = S.ui.anchor != null ? box.querySelector(`[data-mi="${S.ui.anchor}"]`) : null;
-  if (!el){ sp.style.height = '0px'; return; }
-  sp.style.height = '0px';
-  const below = box.scrollHeight - el.offsetTop;
-  sp.style.height = Math.max(0, box.clientHeight - below - 4) + 'px';
-  if (scroll) box.scrollTop = Math.max(0, el.offsetTop - 12);
+  if (!el){ if (sp.style.height !== '0px') sp.style.height = '0px'; return; }
+  // 余白を一度0にしないで計算する（毎回0にすると画面がガタつく）
+  const spH = sp.offsetHeight;
+  const below = box.scrollHeight - spH - el.offsetTop;
+  const h = Math.max(0, box.clientHeight - below - 4);
+  if (Math.abs(h - spH) > 1) sp.style.height = h + 'px';
+  if (scroll){
+    const tgt = Math.max(0, el.offsetTop - 12);
+    if (Math.abs(box.scrollTop - tgt) > 1) box.scrollTop = tgt;
+  }
 }
 // 送った直後は、キーボードが閉じたりフォントが読み込まれたりして高さが変わるので、少し後にもう一度合わせる
 function anchorNow(box){
@@ -596,12 +601,28 @@ function watchBox(box){
   boxObserver.observe(box);
 }
 function autosize(el){ el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, window.innerHeight * 0.38) + 'px'; }
+// 届いた文字はいったん貯めて、一定の速さで流して出す。貯まっているほど速く、全部届いたら一気に出しきる
+const streamShown = () => S.stream ? S.stream.text.slice(0, S.stream.shown || 0) : '';
+const nextFrame = window.requestAnimationFrame ? f => window.requestAnimationFrame(f) : f => setTimeout(f, 16);
+function pump(){
+  const st = S.stream;
+  if (!st) return;
+  const total = st.text.length, back = total - st.shown;
+  if (back > 0){
+    let rate = 1.2 + back * 0.04;
+    if (st.done) rate = Math.max(rate, back / 6);
+    st.shown = Math.min(total, st.shown + Math.max(1, Math.round(rate)));
+    updateStream();
+  }
+  if (st.done && st.shown >= st.text.length){ if (st.drained) st.drained(); return; }
+  nextFrame(pump);
+}
 function updateStream(){
   const el = $('#streamText');
   const box = $('#msgs');
-  if (!el || !box) return;
+  if (!el || !box || !S.stream) return;
   const top = box.scrollTop;
-  el.innerHTML = fmt(S.stream.text);
+  el.innerHTML = fmt(streamShown());
   // アリサが自分で動かしていなければ、送ったメッセージを上に置いたまま。動かしていたら、その位置のまま
   if (!S.ui.userScrolled) layoutAnchor(true);
   else { layoutAnchor(false); box.scrollTop = top; }
@@ -930,13 +951,22 @@ async function runAssistant(cid){
   const c = chat(cid), p = persona(c.personaId);
   const msgs = await getMsgs(cid);
   if (!S.settings.apiKey){ S.ui.error = { chatId: cid, message: '設定でAPIキーを貼ってね', retry: true }; render(); return; }
-  S.stream = { chatId: cid, text: '', ctrl: new AbortController() };
+  S.stream = { chatId: cid, text: '', shown: 0, done: false, ctrl: new AbortController() };
   S.ui.error = null;
   for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user'){ S.ui.anchor = i; break; }
   S.ui.userScrolled = false;
   render({ anchor: true });
+  nextFrame(pump);
   try {
-    const r = await converse(p, msgs, S.stream.ctrl.signal, t => { if (S.stream){ S.stream.text = t; updateStream(); } }, c.cutAt || 0);
+    const r = await converse(p, msgs, S.stream.ctrl.signal, t => { if (S.stream) S.stream.text = t; }, c.cutAt || 0);
+    // 流しきるのを待つ（アプリが裏にいて画面が止まっていても、4秒で先に進む）
+    if (S.stream){
+      S.stream.done = true;
+      await Promise.race([
+        new Promise(res => { if (S.stream.shown >= S.stream.text.length) res(); else S.stream.drained = res; }),
+        new Promise(res => setTimeout(res, 4000)),
+      ]);
+    }
     if (r.text.trim()){
       const m = { role: 'assistant', text: r.text, ts: Date.now() };
       if (r.stop === 'max_tokens') m.stopped = true;
