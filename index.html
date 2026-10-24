@@ -103,6 +103,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .act.icon{width:40px;padding:0;display:flex;align-items:center;justify-content:center}
 .act{min-height:40px;padding:0 10px;border:none;background:none;color:var(--muted);font-size:13px;border-radius:10px}
 .act:active{background:var(--surface)}
+.act:disabled{opacity:1}
 .note{font-size:12px;color:var(--muted);align-self:flex-start;margin-top:-8px;padding-left:6px}
 .err{align-self:stretch;border:1px solid rgba(232,161,147,.45);border-radius:14px;padding:12px 14px;color:var(--error);font-size:14px}
 .err .detail{font-size:12px;color:var(--muted);margin-top:4px;word-break:break-all}
@@ -167,7 +168,7 @@ textarea.t.small{min-height:120px}
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.8.1';
+const APP_VERSION = '0.8.2';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -210,7 +211,18 @@ const money = n => '$' + (n || 0).toFixed(2);
 // 空行で段落に分けて表示する（空行がそのまま大きなすき間にならないように）
 // （）の中（しぐさ）は少し薄い色にする
 const deco = h => h.replace(/[（(][^（）()\n]{0,400}[）)]/g, m => `<span class="dsc">${m}</span>`);
-const fmt = t => String(t || '').replace(/^\s+|\s+$/g, '').split(/\n[ \t\u3000]*\n+/).map(p => `<p>${deco(esc(p))}</p>`).join('');
+// （）だけの行は、前後を一行あけて段落として見せる（しぐさの次の行が詰まって見えないように）
+const isActLine = l => /^[\s\u3000]*[（(].*[）)][\s\u3000]*$/.test(l);
+function spaceActs(t){
+  const lines = t.split('\n'), out = [];
+  lines.forEach((l, i) => {
+    if (isActLine(l) && out.length && out[out.length - 1].trim()) out.push('');
+    out.push(l);
+    if (isActLine(l) && i < lines.length - 1 && lines[i + 1].trim()) out.push('');
+  });
+  return out.join('\n');
+}
+const fmt = t => spaceActs(String(t || '').replace(/^\s+|\s+$/g, '')).split(/\n[ \t\u3000]*\n+/).map(p => `<p>${deco(esc(p))}</p>`).join('');
 
 const ICON = {
   more:'<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="19" cy="12" r="1.8" fill="currentColor"/></svg>',
@@ -402,6 +414,8 @@ function chatView(cid){
     }
   });
   if (streaming){
+    // 「考えたこと」の場所を先に出しておく（終わってから割り込んでカクッとならないように）
+    if (S.settings.showThink && p.think !== false) h += `<button class="act thinkbtn" disabled>考えたこと ▾</button>`;
     h += `<div class="bubble ai" id="streamText">${streamShown() ? fmt(streamShown()) : '<span class="dots" aria-label="書いているところ"><i></i><i></i><i></i></span>'}</div>`;
   }
   if (c.cutOffer != null && msgs[c.cutOffer] && !streaming){
@@ -609,11 +623,17 @@ function pump(){
   if (!st) return;
   const total = st.text.length, back = total - st.shown;
   if (back > 0){
-    let rate = 1.2 + back * 0.04;
-    if (st.done) rate = Math.max(rate, back / 6);
-    st.shown = Math.min(total, st.shown + Math.max(1, Math.round(rate)));
-    updateStream();
-  }
+    // 1コマに0.55文字くらいずつ（小数も貯めて、すーっと進める）。貯まっているほど少し速く、全部届いたら素早く出しきる
+    let rate = 0.55 + back * 0.008;
+    if (st.done) rate = Math.max(rate, back / 24);
+    st.acc = (st.acc || 0) + rate;
+    const step = Math.floor(st.acc);
+    if (step > 0){
+      st.acc -= step;
+      st.shown = Math.min(total, st.shown + step);
+      updateStream();
+    }
+  } else st.acc = 0;
   if (st.done && st.shown >= st.text.length){ if (st.drained) st.drained(); return; }
   nextFrame(pump);
 }
