@@ -29,8 +29,7 @@
 *{box-sizing:border-box}
 html,body{height:100%;margin:0;background:var(--bg);color:var(--text)}
 body{font-family:'Noto Sans JP','Noto Sans CJK JP',sans-serif;font-size:16px;line-height:1.6;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
-/* 下の72pxは、Netlifyが右下に出す「Powered by Netlify」の帯をよけるための余白 */
-#app{height:100%;display:flex;flex-direction:column;max-width:640px;margin:0 auto;padding-top:env(safe-area-inset-top,0px);padding-bottom:calc(env(safe-area-inset-bottom,0px) + 72px)}
+#app{height:100%;display:flex;flex-direction:column;max-width:640px;margin:0 auto;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 button{font:inherit;color:inherit;cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
@@ -121,7 +120,7 @@ textarea.t.small{min-height:120px}
 .section{margin-top:28px;padding-top:8px;border-top:1px solid var(--line)}
 .section h2{font-size:15px;margin:12px 0 4px}
 .hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.6}
-.toast{position:fixed;left:50%;bottom:calc(150px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--accent);color:var(--onaccent);padding:8px 16px;border-radius:999px;font-size:14px;z-index:10}
+.toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--accent);color:var(--onaccent);padding:8px 16px;border-radius:999px;font-size:14px;z-index:10}
 @media (prefers-reduced-motion:reduce){.dots i{animation:none;opacity:.6}}
 </style>
 </head>
@@ -131,7 +130,7 @@ textarea.t.small{min-height:120px}
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.2.3';
+const APP_VERSION = '0.2.4';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -523,12 +522,13 @@ function toast(msg){
 function buildBody(p, msgs, o){
   const cc = o.ttl ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
   const system = [];
+  // 個人設定はいちばん前（後ろにあるカスタム指示のほうが優先されやすいように）
+  const prefs = (S.settings.userPrefs || '').trim();
+  if (prefs) system.push({ type: 'text', text: `【アリサが自分で書いた個人設定】\n${prefs}` });
   if ((p.instructions || '').trim()) system.push({ type: 'text', text: p.instructions });
   const kn = (p.knowledge || []).filter(k => k.text.trim()).map(k => `【${k.name}】\n${k.text}`).join('\n\n');
   if (kn) system.push({ type: 'text', text: kn });
-  const prefs = (S.settings.userPrefs || '').trim();
-  if (prefs) system.push({ type: 'text', text: `【アリサが自分で書いた個人設定】\n${prefs}` });
-  // カスタム指示とナレッジは毎回同じなので、ここまでをキャッシュ
+  // 個人設定・カスタム指示・ナレッジは毎回同じなので、ここまでをキャッシュ
   if (system.length) system[system.length - 1].cache_control = cc;
   // 日付はキャッシュの外（1日1回しか変わらない）
   if (S.settings.sendDate) system.push({ type: 'text', text: `今日の日付：${jpDate()}` });
@@ -861,6 +861,13 @@ const changes = {
 };
 
 /* ===== イベント ===== */
+// 返事が終わったあとに入力欄を押したら、上に置いていたメッセージを解いて、いちばん新しいところを見せる
+app.addEventListener('focusin', e => {
+  if (e.target.id !== 'input' || S.stream || S.ui.anchor == null) return;
+  S.ui.anchor = null;
+  const box = $('#msgs');
+  if (box){ layoutAnchor(false); box.scrollTop = box.scrollHeight; }
+});
 // 会話を指で動かしたら、それ以降は自動で位置を合わせない（次に送るまで）
 ['touchstart', 'wheel'].forEach(ev => app.addEventListener(ev, e => {
   if (e.target.closest && e.target.closest('#msgs')) S.ui.userScrolled = true;
