@@ -74,7 +74,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .chip{font-size:12px;color:var(--accent);background:var(--surface);border-radius:999px;padding:5px 10px;white-space:nowrap;flex-shrink:0}
 .chip.warn{color:var(--warn)}
 
-.msgs{position:relative;flex:1;overflow-y:auto;padding:16px 14px 8px;display:flex;flex-direction:column;gap:12px;-webkit-overflow-scrolling:touch}
+.msgs{position:relative;overflow-anchor:none;flex:1;overflow-y:auto;padding:16px 14px 8px;display:flex;flex-direction:column;gap:12px;-webkit-overflow-scrolling:touch}
 .bubble{max-width:88%;padding:10px 14px;font-size:14.5px;line-height:1.65;letter-spacing:.02em;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
 .bubble p{margin:0}
 .bubble p+p{margin-top:.9em}
@@ -131,7 +131,7 @@ textarea.t.small{min-height:120px}
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.2.2';
+const APP_VERSION = '0.2.3';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -458,7 +458,7 @@ function render(opts = {}){
   }
   const box = $('#msgs');
   if (box){
-    if (opts.anchor) anchorNow(box);
+    if (opts.anchor || (S.ui.anchor != null && !S.ui.userScrolled && opts.keepScroll)) anchorNow(box);
     else {
       layoutAnchor(false);
       if (keepTop != null) box.scrollTop = keepTop;
@@ -508,8 +508,9 @@ function updateStream(){
   if (!el || !box) return;
   const top = box.scrollTop;
   el.innerHTML = fmt(S.stream.text);
-  layoutAnchor(false);
-  box.scrollTop = top; // 流れている間は勝手にスクロールしない
+  // アリサが自分で動かしていなければ、送ったメッセージを上に置いたまま。動かしていたら、その位置のまま
+  if (!S.ui.userScrolled) layoutAnchor(true);
+  else { layoutAnchor(false); box.scrollTop = top; }
 }
 function toast(msg){
   const t = document.createElement('div');
@@ -638,6 +639,7 @@ async function runAssistant(cid){
   S.stream = { chatId: cid, text: '', ctrl: new AbortController() };
   S.ui.error = null;
   for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user'){ S.ui.anchor = i; break; }
+  S.ui.userScrolled = false;
   render({ anchor: true });
   try {
     const r = await callClaude(p, msgs, S.stream.ctrl.signal, t => { if (S.stream){ S.stream.text = t; updateStream(); } }, usage);
@@ -859,6 +861,10 @@ const changes = {
 };
 
 /* ===== イベント ===== */
+// 会話を指で動かしたら、それ以降は自動で位置を合わせない（次に送るまで）
+['touchstart', 'wheel'].forEach(ev => app.addEventListener(ev, e => {
+  if (e.target.closest && e.target.closest('#msgs')) S.ui.userScrolled = true;
+}, { passive: true }));
 app.addEventListener('click', e => {
   const t = e.target.closest('[data-act]');
   if (t && actions[t.dataset.act]) actions[t.dataset.act](t, e);
