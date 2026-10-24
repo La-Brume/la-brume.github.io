@@ -129,6 +129,10 @@ button{font:inherit;color:inherit;cursor:pointer}
 .att .x{position:absolute;top:3px;right:3px;width:24px;height:24px;border-radius:12px;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;padding:0}
 .thinkbtn{align-self:flex-start;margin-bottom:-6px}
 .thinkbox{align-self:flex-start;max-width:88%;border-left:2px solid var(--surface2);padding:2px 0 2px 12px;font-size:13px;line-height:1.7;color:var(--muted);white-space:pre-wrap;word-break:break-word}
+.cutbox{align-self:stretch;background:var(--surface);border-radius:14px;padding:12px 14px;font-size:13px;line-height:1.7}
+.cutbox .btns{margin-top:10px}
+.cutbox .btn{min-height:44px}
+.cutline{align-self:stretch;text-align:center;font-size:11px;color:var(--muted);border-top:1px dashed rgba(255,255,255,.15);padding-top:6px}
 .bimgs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
 .bimgs img{width:120px;height:120px;object-fit:cover;border-radius:10px;display:block}
 .bfile{font-size:12px;color:var(--muted);margin-bottom:4px}
@@ -163,7 +167,7 @@ textarea.t.small{min-height:120px}
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.7';
+const APP_VERSION = '0.8';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -268,7 +272,7 @@ function newPersona(name, initial, model){
 
 async function load(){
   await DB.open();
-  S.settings = Object.assign({ apiKey: '', sendDate: true, monthlyCap: 100, userPrefs: '', showThink: false }, (await DB.get('settings')) || {});
+  S.settings = Object.assign({ apiKey: '', sendDate: true, monthlyCap: 100, userPrefs: '', showThink: false, cutChars: 60000 }, (await DB.get('settings')) || {});
   S.personas = (await DB.get('personas')) || [];
   S.chats = (await DB.get('chats')) || [];
   S.usage = (await DB.get('usage')) || {};
@@ -374,6 +378,7 @@ function chatView(cid){
     <div class="msgs" id="msgs">`;
   if (!msgs.length && !streaming) h += `<div class="empty">${esc(p.name)}のお部屋。下から話しかけてね</div>`;
   msgs.forEach((m, i) => {
+    if (c.cutAt && i === c.cutAt) h += `<div class="cutline">ここより前は、もう送っていないよ（探せば見つかる）</div>`;
     const dim = ed != null && i >= ed ? ' dim' : '';
     if (m.role === 'user'){
       h += `<button class="bubble me${dim}" data-act="tapMine" data-i="${i}" data-mi="${i}">${attHtml(m.att)}${fmt(m.text)}</button>`;
@@ -398,6 +403,10 @@ function chatView(cid){
   });
   if (streaming){
     h += `<div class="bubble ai" id="streamText">${S.stream.text ? fmt(S.stream.text) : '<span class="dots" aria-label="書いているところ"><i></i><i></i><i></i></span>'}</div>`;
+  }
+  if (c.cutOffer != null && msgs[c.cutOffer] && !streaming){
+    h += `<div class="cutbox">会話が長くなってきたよ。${shortDate(ymd(new Date(msgs[c.cutOffer].ts)))}のこのあたりより前を、そろそろ送らないようにするね。残したいことがあったら、先に「覚えといて」って頼んでから切ってね。画面からは消えないし、探せば見つかるよ。
+      <div class="btns"><button class="btn" data-act="cutNow">切る</button><button class="btn ghost" data-act="cutLater">あとで</button></div></div>`;
   }
   const err = S.ui.error;
   if (err && err.chatId === cid && !streaming){
@@ -443,6 +452,10 @@ function settingsView(){
     <label class="toggle"><input type="checkbox" ${s.sendDate ? 'checked' : ''} data-change="sendDate">今日の日付をみんなに渡す（時間は渡さない）</label>
 
     <label class="toggle"><input type="checkbox" ${s.showThink ? 'checked' : ''} data-change="showThink">返事の上に「考えたこと」を出す（開いたときだけ日本語に訳すので、そのときだけ少しお金がかかります）</label>
+
+    <label class="f" for="cutChars">会話を切る長さ（文字）</label>
+    <input class="t" id="cutChars" type="number" inputmode="numeric" min="10000" step="10000" value="${esc(s.cutChars)}" data-change="cutChars">
+    <div class="hint">ひとつのチャットの会話がこの長さを超えたら、古いほうの半分くらいを、場面の切れ目で送らないようにします。切る前にひと声かけます。画面からは消えず、みんなが探せば見つけられます。</div>
 
     <label class="f" for="cap">月の上限（ドル）</label>
     <input class="t" id="cap" type="number" inputmode="decimal" min="1" value="${esc(s.monthlyCap)}" data-change="cap">
@@ -611,12 +624,36 @@ const TOOLS = [
   { name: 'memory_replace',
     description: '自分のメモリの一部を書きかえる。進展や変化があったときに、古い文を新しい文に置きかえる。アリサに頼まれたときだけ使う。' + MEMORY_RULES,
     input_schema: { type: 'object', properties: { old_text: { type: 'string', description: 'メモリにある、書きかえたい文（そのまま写す）' }, new_text: { type: 'string', description: '新しい文' } }, required: ['old_text', 'new_text'] } },
+  { name: 'search_past',
+    description: '自分のお部屋の過去の会話から、言葉で探す。アリサに「前に話したあれ」と言われたときや、覚えていない昔の話が出てきたときに使う。見つかったところの前後が少しだけ返ってくる。',
+    input_schema: { type: 'object', properties: { query: { type: 'string', description: '探す言葉。いくつか並べるときは空白で区切る' } }, required: ['query'] } },
   { name: 'memory_rewrite',
     description: '自分のメモリ全体を整理して書き直す。アリサに「整理しといて」などと頼まれたときだけ使う。大事なことを落とさないこと。' + MEMORY_RULES,
     input_schema: { type: 'object', properties: { content: { type: 'string', description: '整理したあとのメモリ全体' } }, required: ['content'] } },
 ];
-function runMemTool(p, name, input){
+async function runTool(p, name, input){
   input = input || {};
+  if (name === 'search_past'){
+    const q = String(input.query || '').trim();
+    if (!q) return { msg: '探す言葉が空でした。', note: null };
+    const terms = q.split(/[\s\u3000、,]+/).filter(Boolean).map(t => t.toLowerCase());
+    const hits = [];
+    for (const ch of S.chats.filter(x => x.personaId === p.id)){
+      const ms = await getMsgs(ch.id);
+      ms.forEach(m => {
+        const low = (m.text || '').toLowerCase();
+        const found = terms.filter(w => low.includes(w));
+        if (found.length) hits.push({ ch, m, score: found.length, pos: low.indexOf(found[0]) });
+      });
+    }
+    hits.sort((a, b) => b.score - a.score || b.m.ts - a.m.ts);
+    if (!hits.length) return { msg: `「${q}」は、過去の会話に見つかりませんでした。`, note: '過去の会話を探したよ' };
+    const out = hits.slice(0, 6).map(h => {
+      const t = h.m.text, st = Math.max(0, h.pos - 150);
+      return `【No.${h.ch.no}・${shortDate(ymd(new Date(h.m.ts)))}・${h.m.role === 'user' ? 'アリサ' : p.name}】${st > 0 ? '…' : ''}${t.slice(st, st + 400)}${st + 400 < t.length ? '…' : ''}`;
+    }).join('\n\n');
+    return { msg: out, note: '過去の会話を探したよ' };
+  }
   const mem = p.memory || '';
   if (name === 'memory_add'){
     const t = String(input.text || '').trim();
@@ -785,8 +822,9 @@ async function callClaude(p, apiMsgs, signal, onText, usage, o){
 }
 
 // 返事をもらう。メモリの道具が使われたら、結果を返してもう一度（最大4回）
-async function converse(p, msgs, signal, onText){
-  const apiMsgs = toApiMessages(msgs);
+async function converse(p, msgs, signal, onText, cutAt){
+  const apiMsgs = toApiMessages(cutAt ? msgs.slice(cutAt) : msgs);
+  if (cutAt && apiMsgs.length) apiMsgs[0].content.unshift({ type: 'text', text: '（ここより前の会話は、長くなったので省いてある。必要なら search_past で探せる）' });
   const o = { ttl: true, think: p.think !== false, display: true };
   let shown = '', thoughts = '';
   const notes = [];
@@ -808,8 +846,8 @@ async function converse(p, msgs, signal, onText){
     if (r.stop !== 'tool_use') return { text: shown, stop: r.stop, notes, thoughts };
     const results = [];
     for (const b of r.blocks.filter(b => b.type === 'tool_use')){
-      const res = runMemTool(p, b.name, b.input);
-      if (res.note) notes.push(res.note);
+      const res = await runTool(p, b.name, b.input);
+      if (res.note && !notes.includes(res.note)) notes.push(res.note);
       results.push({ type: 'tool_result', tool_use_id: b.id, content: res.msg });
     }
     await savePersonas();
@@ -850,6 +888,44 @@ function addCost(p, u){
   saveUsage();
 }
 
+// ===== 会話の切り落とし =====
+const chatChars = (msgs, from) => msgs.slice(from).reduce((n, m) => n + (m.text || '').length, 0);
+// 残す長さに近くて、場面の切れ目（日付が変わった・「おやすみ」のあと）になっている、アリサのメッセージの手前を探す
+function proposeCut(msgs, from, keep){
+  const n = msgs.length;
+  let acc = 0, target = -1;
+  for (let i = n - 1; i > from; i--){ acc += (msgs[i].text || '').length; if (acc >= keep){ target = i; break; } }
+  if (target < 0) return null;
+  const isUser = i => msgs[i] && msgs[i].role === 'user';
+  const isBreak = i => isUser(i) && i > 0 && (
+    ymd(new Date(msgs[i].ts)) !== ymd(new Date(msgs[i - 1].ts)) ||
+    /おやすみ/.test((msgs[i - 1].text || '') + (msgs[i - 2] ? msgs[i - 2].text || '' : '')));
+  let best = null, bestD = Infinity;
+  for (let i = from + 1; i < n - 1; i++){
+    if (!isBreak(i)) continue;
+    const kept = chatChars(msgs, i);
+    if (kept < keep * 0.5 || kept > keep * 1.5) continue;
+    const d = Math.abs(i - target);
+    if (d < bestD){ best = i; bestD = d; }
+  }
+  if (best != null) return best;
+  for (let d = 0; d < n; d++){
+    if (target + d < n - 1 && isUser(target + d)) return target + d;
+    if (target - d > from && isUser(target - d)) return target - d;
+  }
+  return null;
+}
+function checkCut(c, msgs){
+  const lim = Number(S.settings.cutChars) || 60000;
+  const from = c.cutAt || 0;
+  const len = chatChars(msgs, from);
+  if (len <= lim || (c.cutSnooze && len <= c.cutSnooze)) return;
+  const idx = proposeCut(msgs, from, lim / 2);
+  if (idx == null) return;
+  if (len > lim * 1.6){ c.cutAt = idx; c.cutOffer = null; c.cutSnooze = null; toast('会話が長くなったので、古いほうを切ったよ'); }
+  else c.cutOffer = idx;
+}
+
 async function runAssistant(cid){
   const c = chat(cid), p = persona(c.personaId);
   const msgs = await getMsgs(cid);
@@ -860,7 +936,7 @@ async function runAssistant(cid){
   S.ui.userScrolled = false;
   render({ anchor: true });
   try {
-    const r = await converse(p, msgs, S.stream.ctrl.signal, t => { if (S.stream){ S.stream.text = t; updateStream(); } });
+    const r = await converse(p, msgs, S.stream.ctrl.signal, t => { if (S.stream){ S.stream.text = t; updateStream(); } }, c.cutAt || 0);
     if (r.text.trim()){
       const m = { role: 'assistant', text: r.text, ts: Date.now() };
       if (r.stop === 'max_tokens') m.stopped = true;
@@ -882,6 +958,7 @@ async function runAssistant(cid){
   } finally {
     S.stream = null;
     c.updatedAt = Date.now();
+    checkCut(c, msgs);
     await saveMsgs(cid); await saveChats();
     render({ keepScroll: true });
   }
@@ -916,7 +993,13 @@ const actions = {
     if ((!text && !atts.length) || S.stream) return;
     const cid = S.view.id;
     const msgs = await getMsgs(cid);
-    if (S.ui.editIndex != null){ msgs.splice(S.ui.editIndex); S.ui.editIndex = null; }
+    if (S.ui.editIndex != null){
+      msgs.splice(S.ui.editIndex);
+      const ec = chat(cid);
+      if (ec.cutAt && ec.cutAt >= msgs.length){ ec.cutAt = 0; }
+      if (ec.cutOffer != null && ec.cutOffer >= msgs.length) ec.cutOffer = null;
+      S.ui.editIndex = null;
+    }
     const um = { role: 'user', text, ts: Date.now() };
     if (atts.length) um.att = atts;
     msgs.push(um);
@@ -952,6 +1035,16 @@ const actions = {
   },
   cancelEdit(){ S.ui.editIndex = null; S.ui.draft = ''; S.ui.att = []; render({ keepScroll: true }); },
   attach(){ $('#attachFile').click(); },
+  async cutNow(){
+    const c = chat(S.view.id);
+    c.cutAt = c.cutOffer; c.cutOffer = null; c.cutSnooze = null;
+    await saveChats(); toast('古いほうを切ったよ'); render({ keepScroll: true });
+  },
+  async cutLater(){
+    const c = chat(S.view.id);
+    c.cutSnooze = chatChars(await getMsgs(c.id), c.cutAt || 0) + 10000; c.cutOffer = null;
+    await saveChats(); render({ keepScroll: true });
+  },
   chatMenu(){ S.ui.menu = !S.ui.menu; render({ keepScroll: true }); },
   async toggleThink(t){
     const i = Number(t.dataset.i), cid = S.view.id;
@@ -978,6 +1071,7 @@ const actions = {
     S.settings.apiKey = $('#apiKey').value.trim();
     S.settings.userPrefs = $('#userPrefs').value;
     const v = Number($('#cap').value); if (v > 0) S.settings.monthlyCap = v;
+    const cv = Number($('#cutChars').value); if (cv >= 10000) S.settings.cutChars = cv;
     await saveSettings();
     toast('保存したよ');
   },
@@ -1067,6 +1161,7 @@ const changes = {
   sendDate(t){ S.settings.sendDate = t.checked; saveSettings(); },
   showThink(t){ S.settings.showThink = t.checked; saveSettings(); },
   userPrefs(t){ S.settings.userPrefs = t.value; saveSettings(); toast('個人設定を保存したよ'); },
+  cutChars(t){ const v = Number(t.value); if (v >= 10000){ S.settings.cutChars = v; saveSettings(); } },
   cap(t){ const v = Number(t.value); if (v > 0){ S.settings.monthlyCap = v; saveSettings(); } },
   chatModel(t){
     const c = chat(S.view.id), p = c && persona(c.personaId);
