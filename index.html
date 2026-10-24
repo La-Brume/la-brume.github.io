@@ -168,7 +168,7 @@ textarea.t.small{min-height:120px}
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.8.2';
+const APP_VERSION = '0.8.3';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -614,7 +614,17 @@ function watchBox(box){
   });
   boxObserver.observe(box);
 }
-function autosize(el){ el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, window.innerHeight * 0.38) + 'px'; }
+// 入力欄の高さを文字に合わせる。測るときに一瞬縮むので、会話の位置を覚えておいてすぐ戻す（打っている間に下へ落ちないように）
+function autosize(el){
+  const box = $('#msgs');
+  const top = box ? box.scrollTop : 0;
+  const old = el.style.height;
+  el.style.height = 'auto';
+  const h = Math.min(el.scrollHeight, window.innerHeight * 0.38) + 'px';
+  el.style.height = h;
+  if (box && box.scrollTop !== top) box.scrollTop = top;
+  if (old === h) return;
+}
 // 届いた文字はいったん貯めて、一定の速さで流して出す。貯まっているほど速く、全部届いたら一気に出しきる
 const streamShown = () => S.stream ? S.stream.text.slice(0, S.stream.shown || 0) : '';
 const nextFrame = window.requestAnimationFrame ? f => window.requestAnimationFrame(f) : f => setTimeout(f, 16);
