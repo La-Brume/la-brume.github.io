@@ -98,14 +98,31 @@ button{font:inherit;color:inherit;cursor:pointer}
 @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
 
 .editbar{display:flex;align-items:center;justify-content:space-between;padding:2px 8px 2px 16px;font-size:13px;color:var(--warn);border-top:1px solid var(--line);flex-shrink:0}
-.composer{display:flex;align-items:flex-end;gap:8px;padding:8px 10px 10px;border-top:1px solid var(--line);flex-shrink:0}
+.composer{padding:6px 10px 10px;flex-shrink:0}
+.cbox{background:var(--surface);border:1px solid rgba(255,255,255,.08);border-radius:24px;padding:8px}
+.cbox textarea{display:block;width:100%;min-height:40px;max-height:38vh;resize:none;border:none;background:transparent;color:var(--text);padding:6px 10px;font:inherit;font-size:14.5px;line-height:1.5}
+.cbox textarea:focus{outline:none}
+.crow{display:flex;align-items:center;gap:8px;margin-top:4px}
+.crow .grow{flex:1}
+.cbtn{width:40px;height:40px;border-radius:20px;border:none;background:var(--surface2);color:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.mchip{position:relative;display:inline-flex;align-items:center;gap:4px;height:40px;padding:0 12px 0 14px;border-radius:20px;background:var(--surface2);font-size:13px;color:var(--text);white-space:nowrap}
+.mchip select{position:absolute;inset:0;width:100%;height:100%;opacity:0;font-size:16px}
+.atts{display:flex;gap:8px;flex-wrap:wrap;padding:2px 2px 8px}
+.att{position:relative;width:64px;height:64px;border-radius:12px;overflow:hidden;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:11px;line-height:1.3;color:var(--muted);text-align:center;padding:4px;word-break:break-all}
+.att img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.att .x{position:absolute;top:3px;right:3px;width:24px;height:24px;border-radius:12px;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;padding:0}
+.thinkbtn{align-self:flex-start;margin-bottom:-6px}
+.thinkbox{align-self:flex-start;max-width:88%;border-left:2px solid var(--surface2);padding:2px 0 2px 12px;font-size:13px;line-height:1.7;color:var(--muted);white-space:pre-wrap;word-break:break-word}
+.bimgs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.bimgs img{width:120px;height:120px;object-fit:cover;border-radius:10px;display:block}
+.bfile{font-size:12px;color:var(--muted);margin-bottom:4px}
 .editbar+.composer{border-top:none}
-.composer textarea{flex:1;min-height:44px;max-height:38vh;resize:none;border:none;border-radius:22px;background:var(--surface);color:var(--text);padding:10px 16px;font:inherit;font-size:14.5px;line-height:1.5}
-.send{width:44px;height:44px;border-radius:22px;border:none;background:var(--accent);color:var(--onaccent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.send{width:40px;height:40px;border-radius:20px;border:none;background:var(--accent);color:var(--onaccent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 
 label.f{display:block;font-size:13px;color:var(--muted);margin:20px 0 6px}
 label.f:first-child{margin-top:4px}
-input.t,textarea.t{width:100%;border:none;border-radius:12px;background:var(--surface);color:var(--text);padding:12px 14px;font:inherit;font-size:16px}
+select.t{-webkit-appearance:none;appearance:none;min-height:48px}
+input.t,textarea.t,select.t{width:100%;border:none;border-radius:12px;background:var(--surface);color:var(--text);padding:12px 14px;font:inherit;font-size:16px}
 textarea.t{min-height:180px;line-height:1.6;resize:vertical}
 textarea.t.small{min-height:120px}
 .pair{display:flex;gap:10px}
@@ -130,7 +147,7 @@ textarea.t.small{min-height:120px}
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.3';
+const APP_VERSION = '0.5';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -138,16 +155,20 @@ const MAX_TOKENS = 32000;
 // モデル名の候補と、1Mトークンあたりの料金（入力, 出力 / ドル）
 // 料金は目安。お部屋の設定画面でひとりずつ書き換えられる。
 const MODELS = [
-  ['claude-fable-5-1', 10, 50],
-  ['claude-fable-5',   10, 50],
-  ['claude-opus-5-5',   4, 20],
-  ['claude-opus-5',     5, 25],
-  ['claude-sonnet-5-5', 2, 10],
-  ['claude-haiku-5-5',  1,  5],
+  ['claude-fable-5-1', 10, 50, 'Fable 5.1'],
+  ['claude-fable-5',   10, 50, 'Fable 5'],
+  ['claude-opus-5-5',   4, 20, 'Opus 5.5'],
+  ['claude-opus-5',     5, 25, 'Opus 5'],
+  ['claude-sonnet-5-5', 2, 10, 'Sonnet 5.5'],
+  ['claude-haiku-5-5',  1,  5, 'Haiku 5.5'],
 ];
 function priceFor(model){
   const m = MODELS.find(x => x[0] === model);
   return m ? [m[1], m[2]] : null;
+}
+function modelLabel(model){
+  const m = MODELS.find(x => x[0] === model);
+  return m ? m[3] : model;
 }
 
 /* ===== 小道具 ===== */
@@ -172,6 +193,8 @@ const deco = h => h.replace(/[（(][^（）()\n]{0,400}[）)]/g, m => `<span cla
 const fmt = t => String(t || '').replace(/^\s+|\s+$/g, '').split(/\n[ \t\u3000]*\n+/).map(p => `<p>${deco(esc(p))}</p>`).join('');
 
 const ICON = {
+  plus:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+  down:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
   copy:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>',
   regen:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
   edit:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg>',
@@ -228,7 +251,7 @@ function newPersona(name, initial, model){
 
 async function load(){
   await DB.open();
-  S.settings = Object.assign({ apiKey: '', sendDate: true, monthlyCap: 100, userPrefs: '' }, (await DB.get('settings')) || {});
+  S.settings = Object.assign({ apiKey: '', sendDate: true, monthlyCap: 100, userPrefs: '', showThink: false }, (await DB.get('settings')) || {});
   S.personas = (await DB.get('personas')) || [];
   S.chats = (await DB.get('chats')) || [];
   S.usage = (await DB.get('usage')) || {};
@@ -304,6 +327,13 @@ function threadsView(pid){
   return h + `</div></div>`;
 }
 
+function attHtml(att){
+  if (!att || !att.length) return '';
+  const imgs = att.filter(a => a.kind === 'image');
+  const files = att.filter(a => a.kind !== 'image');
+  return (imgs.length ? `<span class="bimgs">${imgs.map(a => `<img src="data:${a.mime};base64,${a.data}" alt="">`).join('')}</span>` : '')
+    + files.map(a => `<span class="bfile" style="display:block">ファイル：${esc(a.name)}</span>`).join('');
+}
 function chatView(cid){
   const c = chat(cid);
   if (!c) return homeView();
@@ -313,7 +343,7 @@ function chatView(cid){
   const ed = S.ui.editIndex;
   let h = `<div class="top"><button class="iconbtn" data-act="back" aria-label="戻る">${ICON.back}</button>
     <span class="avatar s">${esc(initialOf(p))}</span>
-    <div class="title"><h1>${esc(p.name)}</h1><span class="sub">No.${c.no}　${esc(p.model)}</span></div>
+    <div class="title"><h1>${esc(p.name)}</h1><span class="sub">No.${c.no}</span></div>
     <span class="chip ${isWarn() ? 'warn' : ''}">今月 ${money(monthUsed())}</span>
     <button class="iconbtn" data-act="deleteChat" data-id="${c.id}" aria-label="このチャットを消す">${ICON.trash}</button></div>
     <div class="msgs" id="msgs">`;
@@ -321,12 +351,17 @@ function chatView(cid){
   msgs.forEach((m, i) => {
     const dim = ed != null && i >= ed ? ' dim' : '';
     if (m.role === 'user'){
-      h += `<button class="bubble me${dim}" data-act="tapMine" data-i="${i}" data-mi="${i}">${fmt(m.text)}</button>`;
+      h += `<button class="bubble me${dim}" data-act="tapMine" data-i="${i}" data-mi="${i}">${attHtml(m.att)}${fmt(m.text)}</button>`;
       if (S.ui.userActions === i && !streaming){
         h += `<div class="acts r"><button class="act icon" data-act="editMsg" data-i="${i}" aria-label="書き直す">${ICON.edit}</button>
           <button class="act icon" data-act="copy" data-i="${i}" aria-label="コピー">${ICON.copy}</button></div>`;
       }
     } else {
+      if (S.settings.showThink && m.think){
+        const open = S.ui.openThink && S.ui.openThink[i];
+        h += `<button class="act thinkbtn" data-act="toggleThink" data-i="${i}" aria-expanded="${open ? 'true' : 'false'}">考えたこと ${open ? '▴' : '▾'}</button>`;
+        if (open) h += `<div class="thinkbox">${esc(m.thinkJa || (isJa(m.think) ? m.think : (S.ui.transErr && S.ui.transErr[i] ? '訳せなかったよ。もう一度開き直してね' : '日本語に訳しているところ…')))}</div>`;
+      }
       h += `<div class="bubble ai${dim}">${fmt(m.text)}</div>`;
       if (m.notes) h += `<div class="note">${esc(m.notes.join('・'))}</div>`;
       if (m.stopped) h += `<div class="note">途中で止めたよ</div>`;
@@ -346,11 +381,22 @@ function chatView(cid){
   }
   h += `<div id="spacer" style="flex-shrink:0;height:0"></div></div>`;
   if (ed != null) h += `<div class="editbar"><span>書き直し中。送ると、ここから先の返事は作り直しになるよ</span><button class="act" data-act="cancelEdit">やめる</button></div>`;
-  h += `<div class="composer"><label for="input" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">メッセージ</label>
+  const atts = S.ui.att || [];
+  const opts = MODELS.map(m => `<option value="${m[0]}" ${m[0] === p.model ? 'selected' : ''}>${esc(m[3])}</option>`).join('')
+    + (priceFor(p.model) ? '' : `<option value="${esc(p.model)}" selected>${esc(p.model)}</option>`);
+  h += `<div class="composer"><div class="cbox">
+    ${atts.length ? `<div class="atts">${atts.map((a, i) => `<div class="att">${a.kind === 'image' ? `<img src="data:${a.mime};base64,${a.data}" alt="">` : esc(a.name)}<button class="x" data-act="rmAtt" data-i="${i}" aria-label="${esc(a.name)}を外す">×</button></div>`).join('')}</div>` : ''}
+    <label for="input" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">メッセージ</label>
     <textarea id="input" rows="1" placeholder="メッセージ"></textarea>
-    ${streaming
-      ? `<button class="send" data-act="stop" aria-label="止める">${ICON.stop}</button>`
-      : `<button class="send" data-act="send" aria-label="送る">${ICON.send}</button>`}
+    <div class="crow">
+      <button class="cbtn" data-act="attach" aria-label="写真やファイルを添える">${ICON.plus}</button>
+      <span class="mchip">${esc(modelLabel(p.model))}${ICON.down}<select data-change="chatModel" aria-label="モデルを切り替える">${opts}</select></span>
+      <span class="grow"></span>
+      ${streaming
+        ? `<button class="send" data-act="stop" aria-label="止める">${ICON.stop}</button>`
+        : `<button class="send" data-act="send" aria-label="送る">${ICON.send}</button>`}
+    </div></div>
+    <input type="file" id="attachFile" accept="image/*,.txt,.md,.pdf,text/plain,text/markdown,application/pdf" multiple hidden data-change="attachFile">
     </div>`;
   return h;
 }
@@ -370,6 +416,8 @@ function settingsView(){
     <div class="hint">Claudeのアプリの「プロフィール」に書いている個人設定を、そのまま貼ってください。どのお部屋でも毎回渡します。</div>
 
     <label class="toggle"><input type="checkbox" ${s.sendDate ? 'checked' : ''} data-change="sendDate">今日の日付をみんなに渡す（時間は渡さない）</label>
+
+    <label class="toggle"><input type="checkbox" ${s.showThink ? 'checked' : ''} data-change="showThink">返事の上に「考えたこと」を出す（開いたときだけ日本語に訳すので、そのときだけ少しお金がかかります）</label>
 
     <label class="f" for="cap">月の上限（ドル）</label>
     <input class="t" id="cap" type="number" inputmode="decimal" min="1" value="${esc(s.monthlyCap)}" data-change="cap">
@@ -404,9 +452,12 @@ function personaView(id){
     <div class="pair"><div><label class="f" for="pName">名前</label><input class="t" id="pName" value="${esc(d.name)}"></div>
     <div style="flex:0 0 96px"><label class="f" for="pInitial">頭の字</label><input class="t" id="pInitial" maxlength="2" value="${esc(d.initial)}"></div></div>
 
-    <label class="f" for="pModel">モデル</label>
-    <input class="t" id="pModel" list="modelList" autocomplete="off" spellcheck="false" value="${esc(d.model)}" data-change="model">
-    <datalist id="modelList">${MODELS.map(m => `<option value="${m[0]}">`).join('')}</datalist>
+    <label class="f" for="pModelSel">モデル</label>
+    <select class="t" id="pModelSel" data-change="modelSel">
+      ${MODELS.map(m => `<option value="${m[0]}" ${m[0] === d.model ? 'selected' : ''}>${esc(m[3])}（${m[0]}）</option>`).join('')}
+      <option value="__other" ${priceFor(d.model) ? '' : 'selected'}>ほかのモデル（自分で書く）</option>
+    </select>
+    <input class="t" id="pModel" autocomplete="off" spellcheck="false" value="${esc(d.model)}" style="margin-top:8px;${priceFor(d.model) ? 'display:none' : ''}" aria-label="モデル名">
 
     <div class="pair"><div><label class="f" for="pIn">入力の料金（1Mあたり$）</label><input class="t" id="pIn" type="number" inputmode="decimal" step="0.01" value="${esc(d.priceIn)}"></div>
     <div><label class="f" for="pOut">出力の料金（1Mあたり$）</label><input class="t" id="pOut" type="number" inputmode="decimal" step="0.01" value="${esc(d.priceOut)}"></div></div>
@@ -564,14 +615,26 @@ function runMemTool(p, name, input){
 }
 
 // 保存してある会話を、APIに送る形にする
+const KEEP_HEAVY = 8; // 写真とPDFは、新しいほうから8個だけ実物を送る
 function toApiMessages(msgs){
+  const heavy = [];
+  msgs.forEach((m, i) => (m.att || []).forEach((a, j) => { if (a.kind !== 'text') heavy.push(i + ':' + j); }));
+  const keep = new Set(heavy.slice(-KEEP_HEAVY));
   const out = [];
-  for (const m of msgs){
+  msgs.forEach((m, i) => {
+    const blocks = [];
+    (m.att || []).forEach((a, j) => {
+      if (a.kind === 'text') blocks.push({ type: 'text', text: `【添付ファイル：${a.name}】\n${a.text}` });
+      else if (!keep.has(i + ':' + j)) blocks.push({ type: 'text', text: `（ここに${a.kind === 'image' ? '写真' : 'PDF'}「${a.name}」があった。古いので、今はもう見えない）` });
+      else if (a.kind === 'image') blocks.push({ type: 'image', source: { type: 'base64', media_type: a.mime, data: a.data } });
+      else if (a.kind === 'pdf') blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: a.data } });
+    });
+    if ((m.text || '').trim() || !blocks.length) blocks.push({ type: 'text', text: m.text || '…' });
     const last = out[out.length - 1];
     // 同じ側が続いたらひとつにまとめる（送信失敗のあとなど）
-    if (last && last.role === m.role) last.content[0].text += '\n\n' + m.text;
-    else out.push({ role: m.role, content: [{ type: 'text', text: m.text }] });
-  }
+    if (last && last.role === m.role) last.content.push(...blocks);
+    else out.push({ role: m.role, content: blocks });
+  });
   while (out.length && out[0].role !== 'user') out.shift();
   return out;
 }
@@ -694,7 +757,7 @@ async function callClaude(p, apiMsgs, signal, onText, usage, o){
 async function converse(p, msgs, signal, onText){
   const apiMsgs = toApiMessages(msgs);
   const o = { ttl: true, think: p.think !== false };
-  let shown = '';
+  let shown = '', thoughts = '';
   const notes = [];
   for (let round = 0; round < 4; round++){
     const sep = shown.trim() ? '\n\n' : '';
@@ -709,7 +772,9 @@ async function converse(p, msgs, signal, onText){
     }
     addCost(p, usage);
     if (r.text.trim()) shown += sep + r.text;
-    if (r.stop !== 'tool_use') return { text: shown, stop: r.stop, notes };
+    const th = r.blocks.filter(b => b.type === 'thinking' && b.thinking).map(b => b.thinking).join('\n\n');
+    if (th) thoughts += (thoughts ? '\n\n' : '') + th;
+    if (r.stop !== 'tool_use') return { text: shown, stop: r.stop, notes, thoughts };
     const results = [];
     for (const b of r.blocks.filter(b => b.type === 'tool_use')){
       const res = runMemTool(p, b.name, b.input);
@@ -720,7 +785,24 @@ async function converse(p, msgs, signal, onText){
     apiMsgs.push({ role: 'assistant', content: r.blocks });
     apiMsgs.push({ role: 'user', content: results });
   }
-  return { text: shown, stop: 'end_turn', notes };
+  return { text: shown, stop: 'end_turn', notes, thoughts };
+}
+
+// 考えたことの日本語訳（開いたときだけ、一番安いモデルで）
+const TRANSLATOR = { model: 'claude-haiku-5-5', priceIn: 1, priceOut: 5 };
+const isJa = t => { const s = String(t || ''); const ja = (s.match(/[\u3040-\u30ff\u4e00-\u9fff]/g) || []).length; return ja > s.length * 0.2; };
+async function translateThink(cid, i){
+  const m = S.msgs[cid][i];
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': S.settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+    body: JSON.stringify({ model: TRANSLATOR.model, max_tokens: 4000, messages: [{ role: 'user', content: '次の文章を、自然な日本語に訳してください。訳した文章だけを書いてください。\n\n' + m.think }] }),
+  });
+  const j = await res.json();
+  if (!res.ok) throw mkErr('訳せなかったよ', (j.error && j.error.message) || res.status);
+  addCost(TRANSLATOR, j.usage);
+  m.thinkJa = (j.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+  await saveMsgs(cid);
 }
 
 function readMult(model){ return model === 'claude-opus-5-5' ? 0.05 : 0.1; }
@@ -752,6 +834,7 @@ async function runAssistant(cid){
       const m = { role: 'assistant', text: r.text, ts: Date.now() };
       if (r.stop === 'max_tokens') m.stopped = true;
       if (r.notes.length) m.notes = r.notes;
+      if (r.thoughts) m.think = r.thoughts;
       msgs.push(m);
     } else {
       if (r.notes.length) toast(r.notes.join('・'));
@@ -798,12 +881,15 @@ const actions = {
   async send(){
     const input = $('#input');
     const text = input.value.trim();
-    if (!text || S.stream) return;
+    const atts = S.ui.att || [];
+    if ((!text && !atts.length) || S.stream) return;
     const cid = S.view.id;
     const msgs = await getMsgs(cid);
     if (S.ui.editIndex != null){ msgs.splice(S.ui.editIndex); S.ui.editIndex = null; }
-    msgs.push({ role: 'user', text, ts: Date.now() });
-    S.ui.draft = ''; S.ui.userActions = null;
+    const um = { role: 'user', text, ts: Date.now() };
+    if (atts.length) um.att = atts;
+    msgs.push(um);
+    S.ui.draft = ''; S.ui.att = []; S.ui.userActions = null;
     chat(cid).updatedAt = Date.now();
     await saveMsgs(cid); await saveChats();
     runAssistant(cid);
@@ -830,9 +916,24 @@ const actions = {
     const i = Number(t.dataset.i);
     S.ui.editIndex = i; S.ui.userActions = null;
     S.ui.draft = S.msgs[S.view.id][i].text;
+    S.ui.att = (S.msgs[S.view.id][i].att || []).slice();
     render({ keepScroll: true, focus: true });
   },
-  cancelEdit(){ S.ui.editIndex = null; S.ui.draft = ''; render({ keepScroll: true }); },
+  cancelEdit(){ S.ui.editIndex = null; S.ui.draft = ''; S.ui.att = []; render({ keepScroll: true }); },
+  attach(){ $('#attachFile').click(); },
+  async toggleThink(t){
+    const i = Number(t.dataset.i), cid = S.view.id;
+    S.ui.openThink = S.ui.openThink || {};
+    S.ui.openThink[i] = !S.ui.openThink[i];
+    render({ keepScroll: true });
+    const m = S.msgs[cid][i];
+    if (S.ui.openThink[i] && !m.thinkJa && !isJa(m.think)){
+      S.ui.transErr = S.ui.transErr || {}; S.ui.transErr[i] = false;
+      try { await translateThink(cid, i); } catch(e){ S.ui.transErr[i] = true; }
+      if (S.view.name === 'chat' && S.view.id === cid) render({ keepScroll: true });
+    }
+  },
+  rmAtt(t){ (S.ui.att || []).splice(Number(t.dataset.i), 1); render({ keepScroll: true }); },
   async copy(t){
     const m = S.msgs[S.view.id][Number(t.dataset.i)];
     try { await navigator.clipboard.writeText(m.text); toast('コピーしたよ'); }
@@ -932,12 +1033,45 @@ function collectPD(){
 const changes = {
   apiKey(t){ S.settings.apiKey = t.value.trim(); saveSettings(); toast('キーを保存したよ'); },
   sendDate(t){ S.settings.sendDate = t.checked; saveSettings(); },
+  showThink(t){ S.settings.showThink = t.checked; saveSettings(); },
   userPrefs(t){ S.settings.userPrefs = t.value; saveSettings(); toast('個人設定を保存したよ'); },
   cap(t){ const v = Number(t.value); if (v > 0){ S.settings.monthlyCap = v; saveSettings(); } },
-  model(t){
+  chatModel(t){
+    const c = chat(S.view.id), p = c && persona(c.personaId);
+    if (!p) return;
+    p.model = t.value;
+    const pr = priceFor(t.value);
+    if (pr){ p.priceIn = pr[0]; p.priceOut = pr[1]; }
+    savePersonas();
+    toast(`${modelLabel(p.model)}にしたよ`);
+    render({ keepScroll: true });
+  },
+  async attachFile(t){
+    S.ui.att = S.ui.att || [];
+    for (const f of t.files){
+      try {
+        if (f.type.startsWith('image/')){
+          if (S.ui.att.filter(a => a.kind === 'image').length >= 4){ toast('写真は一度に4枚までだよ'); continue; }
+          S.ui.att.push(await shrinkImage(f));
+        } else if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)){
+          if (f.size > 20 * 1024 * 1024){ toast('PDFが大きすぎるよ（20MBまで）'); continue; }
+          S.ui.att.push({ kind: 'pdf', name: f.name, data: await toBase64(f) });
+        } else {
+          S.ui.att.push({ kind: 'text', name: f.name, text: await f.text() });
+        }
+      } catch(e){ toast(`${f.name} が読めなかったよ`); }
+    }
+    t.value = '';
+    render({ keepScroll: true });
+  },
+  modelSel(t){
+    const box = $('#pModel');
+    if (t.value === '__other'){ box.style.display = ''; box.value = ''; box.focus(); return; }
+    box.style.display = 'none';
+    box.value = t.value;
+    const pr = priceFor(t.value);
+    if (pr){ $('#pIn').value = pr[0]; $('#pOut').value = pr[1]; }
     collectPD();
-    const pr = priceFor(t.value.trim());
-    if (pr){ S.ui.pd.priceIn = pr[0]; S.ui.pd.priceOut = pr[1]; $('#pIn').value = pr[0]; $('#pOut').value = pr[1]; }
   },
   async knowFile(t){
     collectPD();
@@ -966,6 +1100,32 @@ const changes = {
     toast('バックアップから戻したよ');
   },
 };
+
+// 写真は送る前に小さくする（長いほうの辺を1568pxまで、JPEG）
+function shrinkImage(file){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const max = 1568, sc = Math.min(1, max / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.width * sc); cv.height = Math.round(img.height * sc);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(url);
+      resolve({ kind: 'image', mime: 'image/jpeg', name: file.name, data: cv.toDataURL('image/jpeg', 0.85).split(',')[1] });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image')); };
+    img.src = url;
+  });
+}
+function toBase64(file){
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1]);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+}
 
 /* ===== イベント ===== */
 // 返事が終わったあとに入力欄を押したら、上に置いていたメッセージを解いて、いちばん新しいところを見せる
