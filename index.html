@@ -210,7 +210,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.9';
+const APP_VERSION = '0.9.1';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -1433,17 +1433,22 @@ function toBase64(file){
 
 /* ===== イベント ===== */
 // 下から出てくる画面：上の部分を引っぱり上げると全画面、引き下げると小さく／閉じる
-let sheetY = null;
+// 画面のどこを触っても引っぱれる。中身を読んでいる途中（上までスクロールしていない）なら、下に引いても閉じない
+let sheetY = null, sheetTop = true;
 app.addEventListener('touchstart', e => {
-  if (e.target.closest && e.target.closest('.grab, .shead')) sheetY = e.touches[0].clientY; else sheetY = null;
+  if (e.target.closest && e.target.closest('#sheet')){
+    sheetY = e.touches[0].clientY;
+    const b = $('#sheet .sbody');
+    sheetTop = !b || b.scrollTop <= 0 || !!e.target.closest('.grab, .shead');
+  } else sheetY = null;
 }, { passive: true });
 app.addEventListener('touchend', e => {
   if (sheetY == null || !S.ui.sheet) return;
   const dy = e.changedTouches[0].clientY - sheetY; sheetY = null;
   const el = $('#sheet');
   if (!el) return;
-  if (dy < -30 && S.ui.sheet.type === 'think'){ S.ui.sheet.full = true; el.classList.add('full'); }
-  else if (dy > 60){
+  if (dy < -30 && S.ui.sheet.type === 'think' && !S.ui.sheet.full){ S.ui.sheet.full = true; el.classList.add('full'); }
+  else if (dy > 60 && sheetTop){
     if (S.ui.sheet.full){ S.ui.sheet.full = false; el.classList.remove('full'); }
     else { S.ui.sheet = null; render({ keepScroll: true }); }
   }
