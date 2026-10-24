@@ -1,0 +1,896 @@
+<!doctype html>
+<!--
+  La Brume Enchantée（みんなのお部屋アプリ）
+  アリサ専用。Claude APIで、みんなと話すためのアプリ。
+  ・サーバーなし。データはすべてこのスマホのブラウザ（IndexedDB）の中。
+  ・APIキーは設定画面で貼る。コードには書かない。
+  ・このファイル1個で全部動く。直すときは、このファイルを丸ごと置き直す。
+  詳しくは「引き継ぎ書」へ。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#2B2A27">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="La Brume">
+<title>La Brume</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<style>
+:root{
+  --bg:#2B2A27; --surface:#393834; --surface2:#4A4843;
+  --text:#E8E2D6; --muted:#B5AFA4; --line:rgba(255,255,255,.09);
+  --accent:#DDD6C9; --onaccent:#2B2A27; --warn:#E6C27E; --error:#E8A193;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--text)}
+body{font-family:'Noto Sans JP','Noto Sans CJK JP',sans-serif;font-size:16px;line-height:1.6;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
+/* 下の72pxは、Netlifyが右下に出す「Powered by Netlify」の帯をよけるための余白 */
+#app{height:100%;display:flex;flex-direction:column;max-width:640px;margin:0 auto;padding-top:env(safe-area-inset-top,0px);padding-bottom:calc(env(safe-area-inset-bottom,0px) + 72px)}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.top{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);flex-shrink:0;min-height:60px}
+.top .title{flex:1;min-width:0}
+.top h1{font-size:18px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top .sub{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.big{font-size:26px;font-weight:700;margin:0;padding:20px 16px 4px}
+.iconbtn{width:44px;height:44px;border:none;background:none;border-radius:22px;display:flex;align-items:center;justify-content:center;color:var(--accent);flex-shrink:0}
+.iconbtn:active{background:var(--surface)}
+.scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.pad{padding:16px}
+.sub{font-size:13px;color:var(--muted)}
+
+.card{background:var(--surface);border-radius:16px;padding:16px;margin-bottom:16px}
+.usage-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.amount{font-size:20px;font-weight:700}
+.bar{height:8px;border-radius:4px;background:rgba(255,255,255,.1);overflow:hidden;margin-top:10px}
+.bar>div{height:100%;background:var(--accent)}
+.warn .bar>div{background:var(--warn)}
+.warn .amount{color:var(--warn)}
+
+.row{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;display:flex;align-items:center;gap:14px;min-height:68px;padding:10px 12px;border-radius:14px;background:var(--surface);border:none;width:100%;text-align:left;margin-bottom:8px;color:var(--text)}
+.row:active{background:var(--surface2)}
+.row .grow{flex:1;min-width:0}
+.row .name{font-size:17px;font-weight:700}
+.avatar{width:44px;height:44px;border-radius:22px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}
+.avatar.s{width:36px;height:36px;font-size:15px}
+.thread .no{font-size:12px;color:var(--muted)}
+.thread .date{font-size:16px}
+
+.btn{display:block;min-height:48px;border-radius:14px;border:none;background:var(--accent);color:var(--onaccent);font-weight:700;padding:0 18px;width:100%;font-size:15px}
+.btn.ghost{background:transparent;color:var(--text);border:1px solid rgba(255,255,255,.18);font-weight:500}
+.btn.danger{background:transparent;color:var(--error);border:1px solid rgba(232,161,147,.45);font-weight:500}
+.btn+.btn{margin-top:10px}
+.btns{display:flex;gap:10px}
+.btns .btn{margin-top:0}
+.notice{border:1px solid rgba(230,194,126,.45);color:var(--warn);border-radius:14px;padding:12px 14px;font-size:14px;margin-bottom:16px}
+.empty{color:var(--muted);text-align:center;padding:32px 8px;font-size:14px}
+
+.chip{font-size:12px;color:var(--accent);background:var(--surface);border-radius:999px;padding:5px 10px;white-space:nowrap;flex-shrink:0}
+.chip.warn{color:var(--warn)}
+
+.msgs{position:relative;flex:1;overflow-y:auto;padding:16px 14px 8px;display:flex;flex-direction:column;gap:12px;-webkit-overflow-scrolling:touch}
+.bubble{max-width:88%;padding:10px 14px;font-size:14.5px;line-height:1.65;letter-spacing:.02em;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
+.bubble p{margin:0}
+.bubble p+p{margin-top:.9em}
+.bubble .dsc{color:#B9B2A6}
+.bubble.ai{align-self:flex-start;background:var(--surface);border-radius:18px 18px 18px 6px}
+.bubble.me{align-self:flex-end;background:var(--surface2);border-radius:18px 18px 6px 18px;border:none;text-align:left;color:var(--text)}
+.dim{opacity:.35}
+.acts{display:flex;gap:2px;margin-top:-8px}
+.acts.r{align-self:flex-end}
+.acts.l{align-self:flex-start}
+.act.icon{width:40px;padding:0;display:flex;align-items:center;justify-content:center}
+.act{min-height:40px;padding:0 10px;border:none;background:none;color:var(--muted);font-size:13px;border-radius:10px}
+.act:active{background:var(--surface)}
+.note{font-size:12px;color:var(--muted);align-self:flex-start;margin-top:-8px;padding-left:6px}
+.err{align-self:stretch;border:1px solid rgba(232,161,147,.45);border-radius:14px;padding:12px 14px;color:var(--error);font-size:14px}
+.err .detail{font-size:12px;color:var(--muted);margin-top:4px;word-break:break-all}
+.err .btn{margin-top:10px;min-height:44px}
+.dots{display:inline-flex;gap:5px;padding:4px 0}
+.dots i{width:7px;height:7px;border-radius:4px;background:var(--muted);animation:blink 1.2s infinite}
+.dots i:nth-child(2){animation-delay:.2s}
+.dots i:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+
+.editbar{display:flex;align-items:center;justify-content:space-between;padding:2px 8px 2px 16px;font-size:13px;color:var(--warn);border-top:1px solid var(--line);flex-shrink:0}
+.composer{display:flex;align-items:flex-end;gap:8px;padding:8px 10px 10px;border-top:1px solid var(--line);flex-shrink:0}
+.editbar+.composer{border-top:none}
+.composer textarea{flex:1;min-height:44px;max-height:38vh;resize:none;border:none;border-radius:22px;background:var(--surface);color:var(--text);padding:10px 16px;font:inherit;font-size:14.5px;line-height:1.5}
+.send{width:44px;height:44px;border-radius:22px;border:none;background:var(--accent);color:var(--onaccent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+
+label.f{display:block;font-size:13px;color:var(--muted);margin:20px 0 6px}
+label.f:first-child{margin-top:4px}
+input.t,textarea.t{width:100%;border:none;border-radius:12px;background:var(--surface);color:var(--text);padding:12px 14px;font:inherit;font-size:16px}
+textarea.t{min-height:180px;line-height:1.6;resize:vertical}
+textarea.t.small{min-height:120px}
+.pair{display:flex;gap:10px}
+.pair>div{flex:1}
+.toggle{display:flex;align-items:center;gap:12px;min-height:48px;font-size:15px}
+.toggle input{width:22px;height:22px;accent-color:var(--accent)}
+.keyrow{display:flex;gap:8px}
+.keyrow input{flex:1}
+.keyrow .btn{width:auto}
+.kitem{display:flex;align-items:center;gap:8px;background:var(--surface);border-radius:12px;padding:6px 6px 6px 14px;margin-bottom:6px}
+.kitem .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.section{margin-top:28px;padding-top:8px;border-top:1px solid var(--line)}
+.section h2{font-size:15px;margin:12px 0 4px}
+.hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.6}
+.toast{position:fixed;left:50%;bottom:calc(150px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--accent);color:var(--onaccent);padding:8px 16px;border-radius:999px;font-size:14px;z-index:10}
+@media (prefers-reduced-motion:reduce){.dots i{animation:none;opacity:.6}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+'use strict';
+
+/* ===== 基本設定 ===== */
+const APP_VERSION = '0.2.2';
+const BACKUP_FORMAT = 1;
+const API_URL = 'https://api.anthropic.com/v1/messages';
+const MAX_TOKENS = 32000;
+
+// モデル名の候補と、1Mトークンあたりの料金（入力, 出力 / ドル）
+// 料金は目安。お部屋の設定画面でひとりずつ書き換えられる。
+const MODELS = [
+  ['claude-fable-5-1', 10, 50],
+  ['claude-fable-5',   10, 50],
+  ['claude-opus-5-5',   5, 25],
+  ['claude-opus-5',     5, 25],
+  ['claude-sonnet-5-5', 2, 10],
+  ['claude-haiku-5-5',  1,  5],
+];
+function priceFor(model){
+  const m = MODELS.find(x => x[0] === model);
+  return m ? [m[1], m[2]] : null;
+}
+
+/* ===== 小道具 ===== */
+const $ = s => document.querySelector(s);
+const app = $('#app');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const WD = ['日','月','火','水','木','金','土'];
+const pad2 = n => String(n).padStart(2, '0');
+function ymd(d = new Date()){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
+function shortDate(iso){
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return `${String(y).slice(2)}.${pad2(m)}.${pad2(d)}(${WD[dt.getDay()]})`;
+}
+function jpDate(d = new Date()){ return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${WD[d.getDay()]}）`; }
+function monthKey(d = new Date()){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}`; }
+const money = n => '$' + (n || 0).toFixed(2);
+// 空行で段落に分けて表示する（空行がそのまま大きなすき間にならないように）
+// （）の中（しぐさ）は少し薄い色にする
+const deco = h => h.replace(/[（(][^（）()\n]{0,400}[）)]/g, m => `<span class="dsc">${m}</span>`);
+const fmt = t => String(t || '').replace(/^\s+|\s+$/g, '').split(/\n[ \t\u3000]*\n+/).map(p => `<p>${deco(esc(p))}</p>`).join('');
+
+const ICON = {
+  copy:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>',
+  regen:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
+  edit:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg>',
+  back:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>',
+  chev:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#B5AFA4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>',
+  send:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>',
+  stop:'<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>',
+  gear:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  trash:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>',
+};
+
+/* ===== 保存場所（IndexedDB） =====
+   キーと中身：
+   settings            … {apiKey, sendDate, monthlyCap}
+   personas            … みんなの配列
+   chats               … チャットの配列
+   usage               … {'2026-10': 使った金額(ドル)}
+   msgs:<チャットのid> … そのチャットの会話の配列
+*/
+const DB = {
+  db: null,
+  open(){
+    return new Promise((res, rej) => {
+      const r = indexedDB.open('minna-no-oheya', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => { this.db = r.result; res(); };
+      r.onerror = () => rej(r.error);
+    });
+  },
+  _req(mode, fn){
+    return new Promise((res, rej) => {
+      const r = fn(this.db.transaction('kv', mode).objectStore('kv'));
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  },
+  get(k){ return this._req('readonly', s => s.get(k)); },
+  set(k, v){ return this._req('readwrite', s => s.put(v, k)); },
+  del(k){ return this._req('readwrite', s => s.delete(k)); },
+  keys(){ return this._req('readonly', s => s.getAllKeys()); },
+  clear(){ return this._req('readwrite', s => s.clear()); },
+};
+
+/* ===== 状態 ===== */
+const S = {
+  settings: null, personas: [], chats: [], usage: {}, msgs: {},
+  view: { name: 'home' }, ui: {}, stream: null,
+};
+
+function newPersona(name, initial, model){
+  const p = priceFor(model) || [10, 50];
+  return { id: uid(), name, initial, model, priceIn: p[0], priceOut: p[1], instructions: '', knowledge: [], nextNo: 1 };
+}
+
+async function load(){
+  await DB.open();
+  S.settings = Object.assign({ apiKey: '', sendDate: true, monthlyCap: 100, userPrefs: '' }, (await DB.get('settings')) || {});
+  S.personas = (await DB.get('personas')) || [];
+  S.chats = (await DB.get('chats')) || [];
+  S.usage = (await DB.get('usage')) || {};
+  if (!S.personas.length){
+    S.personas = [newPersona('スズ', '硯', 'claude-opus-5')];
+    await savePersonas();
+  }
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e){}
+}
+const saveSettings = () => DB.set('settings', S.settings);
+const savePersonas = () => DB.set('personas', S.personas);
+const saveChats = () => DB.set('chats', S.chats);
+const saveUsage = () => DB.set('usage', S.usage);
+async function getMsgs(cid){
+  if (!S.msgs[cid]) S.msgs[cid] = (await DB.get('msgs:' + cid)) || [];
+  return S.msgs[cid];
+}
+const saveMsgs = cid => DB.set('msgs:' + cid, S.msgs[cid] || []);
+const persona = id => S.personas.find(p => p.id === id);
+const chat = id => S.chats.find(c => c.id === id);
+const monthUsed = () => S.usage[monthKey()] || 0;
+const isWarn = () => monthUsed() >= (Number(S.settings.monthlyCap) || 100) * 0.8;
+const initialOf = p => (p.initial || p.name || '？').slice(0, 2);
+
+/* ===== 画面の切り替え（スマホの戻るボタンにも対応） ===== */
+function go(view){
+  S.view = view; S.ui = {};
+  history.pushState(view, '');
+  render();
+}
+window.addEventListener('popstate', async e => {
+  S.view = e.state || { name: 'home' };
+  S.ui = {};
+  if (S.view.name === 'chat') await getMsgs(S.view.id);
+  render();
+});
+
+/* ===== 画面 ===== */
+function homeView(){
+  const used = monthUsed(), cap = Number(S.settings.monthlyCap) || 100;
+  const pct = Math.min(100, used / cap * 100);
+  let h = `<div class="top"><div class="title"><h1>La Brume Enchantée</h1></div>
+    <button class="iconbtn" data-act="settings" aria-label="設定">${ICON.gear}</button></div>
+    <div class="scroll"><div class="pad">`;
+  if (!S.settings.apiKey) h += `<div class="notice">設定でAPIキーを貼ると、話せるようになるよ</div>`;
+  h += `<div class="card ${isWarn() ? 'warn' : ''}"><div class="usage-top"><span class="sub">今月の使用額</span>
+    <span><span class="amount">${money(used)}</span> <span class="sub">/ ${money(cap)}</span></span></div>
+    <div class="bar"><div style="width:${pct}%"></div></div></div>`;
+  for (const p of S.personas){
+    h += `<button class="row" data-act="openPersona" data-id="${p.id}">
+      <span class="avatar">${esc(initialOf(p))}</span>
+      <span class="grow"><span class="name">${esc(p.name)}</span><br><span class="sub">${esc(p.model)}</span></span>${ICON.chev}</button>`;
+  }
+  h += `<button class="btn ghost" data-act="newPersona" style="margin-top:8px">お部屋を追加</button>`;
+  h += `</div></div>`;
+  return h;
+}
+
+function threadsView(pid){
+  const p = persona(pid);
+  if (!p) return homeView();
+  const list = S.chats.filter(c => c.personaId === pid).sort((a, b) => b.updatedAt - a.updatedAt);
+  let h = `<div class="top"><button class="iconbtn" data-act="back" aria-label="戻る">${ICON.back}</button>
+    <div class="title"><h1>${esc(p.name)}</h1></div>
+    <button class="iconbtn" data-act="editPersona" data-id="${p.id}" aria-label="お部屋の設定">${ICON.gear}</button></div>
+    <div class="scroll"><div class="pad">
+    <button class="btn" data-act="newChat" data-id="${p.id}" style="margin-bottom:16px">新しいチャット</button>`;
+  if (!list.length) h += `<div class="empty">まだチャットはありません</div>`;
+  for (const c of list){
+    h += `<button class="row thread" data-act="openChat" data-id="${c.id}">
+      <span class="grow"><span class="no">No.${c.no}</span><br><span class="date">${shortDate(c.start)}〜</span></span>${ICON.chev}</button>`;
+  }
+  return h + `</div></div>`;
+}
+
+function chatView(cid){
+  const c = chat(cid);
+  if (!c) return homeView();
+  const p = persona(c.personaId);
+  const msgs = S.msgs[cid] || [];
+  const streaming = S.stream && S.stream.chatId === cid;
+  const ed = S.ui.editIndex;
+  let h = `<div class="top"><button class="iconbtn" data-act="back" aria-label="戻る">${ICON.back}</button>
+    <span class="avatar s">${esc(initialOf(p))}</span>
+    <div class="title"><h1>${esc(p.name)}</h1><span class="sub">No.${c.no}　${esc(p.model)}</span></div>
+    <span class="chip ${isWarn() ? 'warn' : ''}">今月 ${money(monthUsed())}</span>
+    <button class="iconbtn" data-act="deleteChat" data-id="${c.id}" aria-label="このチャットを消す">${ICON.trash}</button></div>
+    <div class="msgs" id="msgs">`;
+  if (!msgs.length && !streaming) h += `<div class="empty">${esc(p.name)}のお部屋。下から話しかけてね</div>`;
+  msgs.forEach((m, i) => {
+    const dim = ed != null && i >= ed ? ' dim' : '';
+    if (m.role === 'user'){
+      h += `<button class="bubble me${dim}" data-act="tapMine" data-i="${i}" data-mi="${i}">${fmt(m.text)}</button>`;
+      if (S.ui.userActions === i && !streaming){
+        h += `<div class="acts r"><button class="act icon" data-act="editMsg" data-i="${i}" aria-label="書き直す">${ICON.edit}</button>
+          <button class="act icon" data-act="copy" data-i="${i}" aria-label="コピー">${ICON.copy}</button></div>`;
+      }
+    } else {
+      h += `<div class="bubble ai${dim}">${fmt(m.text)}</div>`;
+      if (m.stopped) h += `<div class="note">途中で止めたよ</div>`;
+      if (i === msgs.length - 1 && !streaming && ed == null){
+        h += `<div class="acts l"><button class="act icon" data-act="copy" data-i="${i}" aria-label="コピー">${ICON.copy}</button>
+          <button class="act icon" data-act="regen" aria-label="作り直す">${ICON.regen}</button></div>`;
+      }
+    }
+  });
+  if (streaming){
+    h += `<div class="bubble ai" id="streamText">${S.stream.text ? fmt(S.stream.text) : '<span class="dots" aria-label="書いているところ"><i></i><i></i><i></i></span>'}</div>`;
+  }
+  const err = S.ui.error;
+  if (err && err.chatId === cid && !streaming){
+    h += `<div class="err" role="alert">${esc(err.message)}${err.detail ? `<div class="detail">${esc(err.detail)}</div>` : ''}
+      ${err.retry ? `<button class="btn danger" data-act="retry">もう一度送る</button>` : ''}</div>`;
+  }
+  h += `<div id="spacer" style="flex-shrink:0;height:0"></div></div>`;
+  if (ed != null) h += `<div class="editbar"><span>書き直し中。送ると、ここから先の返事は作り直しになるよ</span><button class="act" data-act="cancelEdit">やめる</button></div>`;
+  h += `<div class="composer"><label for="input" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">メッセージ</label>
+    <textarea id="input" rows="1" placeholder="メッセージ"></textarea>
+    ${streaming
+      ? `<button class="send" data-act="stop" aria-label="止める">${ICON.stop}</button>`
+      : `<button class="send" data-act="send" aria-label="送る">${ICON.send}</button>`}
+    </div>`;
+  return h;
+}
+
+function settingsView(){
+  const s = S.settings;
+  return `<div class="top"><button class="iconbtn" data-act="back" aria-label="戻る">${ICON.back}</button>
+    <div class="title"><h1>設定</h1></div></div>
+    <div class="scroll"><div class="pad">
+    <label class="f" for="apiKey">APIキー</label>
+    <div class="keyrow"><input class="t" id="apiKey" type="${S.ui.showKey ? 'text' : 'password'}" autocomplete="off" spellcheck="false" value="${esc(s.apiKey)}" data-change="apiKey" placeholder="sk-ant-…">
+    <button class="btn ghost" data-act="toggleKey">${S.ui.showKey ? '隠す' : '見る'}</button></div>
+    <div class="hint">キーはこのスマホの中にだけ保存されます。バックアップには入りません。</div>
+
+    <label class="f" for="userPrefs">アリサの個人設定（みんなに渡す） <span id="prefCount">${(s.userPrefs || '').length}文字</span></label>
+    <textarea class="t" id="userPrefs" data-change="userPrefs">${esc(s.userPrefs)}</textarea>
+    <div class="hint">Claudeのアプリの「プロフィール」に書いている個人設定を、そのまま貼ってください。どのお部屋でも毎回渡します。</div>
+
+    <label class="toggle"><input type="checkbox" ${s.sendDate ? 'checked' : ''} data-change="sendDate">今日の日付をみんなに渡す（時間は渡さない）</label>
+
+    <label class="f" for="cap">月の上限（ドル）</label>
+    <input class="t" id="cap" type="number" inputmode="decimal" min="1" value="${esc(s.monthlyCap)}" data-change="cap">
+    <div class="hint">上限の8割を超えると、金額の色が変わります。話すのは止めません。金額はアプリの見積もりです。</div>
+
+    <button class="btn" data-act="saveAll" style="margin-top:24px">保存する</button>
+
+    <div class="section"><h2>バックアップ</h2>
+    <div class="hint">みんなの設定・カスタム指示・ナレッジ・会話を、まとめて1個のファイルにします。</div>
+    <div style="margin-top:12px"><button class="btn" data-act="backup">バックアップを保存</button>
+    <button class="btn ghost" data-act="restore">バックアップから戻す</button>
+    <input type="file" id="restoreFile" accept=".json,application/json" data-change="restoreFile" hidden></div></div>
+
+    <div class="section"><h2>お部屋</h2>
+    <div style="margin-top:12px"><button class="btn ghost" data-act="newPersona">お部屋を追加</button></div></div>
+
+    <div class="hint" style="margin-top:32px">La Brume Enchantée　ver ${APP_VERSION}</div>
+    </div></div>`;
+}
+
+function personaView(id){
+  if (!S.ui.pd){
+    const src = id === 'new' ? newPersona('', '', 'claude-opus-5') : persona(id);
+    if (!src) return homeView();
+    S.ui.pd = JSON.parse(JSON.stringify(src));
+  }
+  const d = S.ui.pd;
+  const isNew = id === 'new';
+  let h = `<div class="top"><button class="iconbtn" data-act="back" aria-label="戻る">${ICON.back}</button>
+    <div class="title"><h1>${isNew ? 'お部屋を追加' : 'お部屋の設定'}</h1></div></div>
+    <div class="scroll"><div class="pad">
+    <div class="pair"><div><label class="f" for="pName">名前</label><input class="t" id="pName" value="${esc(d.name)}"></div>
+    <div style="flex:0 0 96px"><label class="f" for="pInitial">頭の字</label><input class="t" id="pInitial" maxlength="2" value="${esc(d.initial)}"></div></div>
+
+    <label class="f" for="pModel">モデル</label>
+    <input class="t" id="pModel" list="modelList" autocomplete="off" spellcheck="false" value="${esc(d.model)}" data-change="model">
+    <datalist id="modelList">${MODELS.map(m => `<option value="${m[0]}">`).join('')}</datalist>
+
+    <div class="pair"><div><label class="f" for="pIn">入力の料金（1Mあたり$）</label><input class="t" id="pIn" type="number" inputmode="decimal" step="0.01" value="${esc(d.priceIn)}"></div>
+    <div><label class="f" for="pOut">出力の料金（1Mあたり$）</label><input class="t" id="pOut" type="number" inputmode="decimal" step="0.01" value="${esc(d.priceOut)}"></div></div>
+    <div class="hint">使用額の見積もりに使います。候補のモデルを選ぶと自動で入ります。</div>
+
+    <label class="f" for="pInst">カスタム指示 <span id="instCount">${(d.instructions || '').length}文字</span></label>
+    <textarea class="t" id="pInst">${esc(d.instructions)}</textarea>
+
+    <label class="toggle"><input type="checkbox" id="pThink" ${d.think !== false ? 'checked' : ''}>返事の前に考える（おすすめ。少しだけお金が増えます）</label>
+
+    <label class="f">ナレッジ</label>`;
+  if (!d.knowledge.length) h += `<div class="sub" style="margin-bottom:8px">まだありません</div>`;
+  d.knowledge.forEach((k, i) => {
+    h += `<div class="kitem"><span class="grow">${esc(k.name)} <span class="sub">${k.text.length}文字</span></span>
+      <button class="act" data-act="delKnow" data-i="${i}">外す</button></div>`;
+  });
+  if (S.ui.pasteOpen){
+    h += `<div class="card" style="margin-top:8px"><label class="f" for="kName">名前</label><input class="t" id="kName" placeholder="たとえば 設定メモ">
+      <label class="f" for="kText">中身</label><textarea class="t small" id="kText"></textarea>
+      <div class="btns" style="margin-top:12px"><button class="btn" data-act="addPaste">足す</button><button class="btn ghost" data-act="closePaste">やめる</button></div></div>`;
+  } else {
+    h += `<div class="btns" style="margin-top:8px"><button class="btn ghost" data-act="pickKnow">ファイルから足す</button><button class="btn ghost" data-act="openPaste">貼りつけて足す</button></div>
+      <input type="file" id="knowFile" accept=".txt,.md,text/plain,text/markdown" multiple hidden data-change="knowFile">`;
+  }
+  h += `<div class="section"><button class="btn" data-act="savePersona">保存する</button>`;
+  if (!isNew) h += `<button class="btn danger" data-act="deletePersona" style="margin-top:28px">このお部屋を消す</button>`;
+  h += `</div></div></div>`;
+  return h;
+}
+
+/* ===== 描画 ===== */
+function render(opts = {}){
+  const v = S.view;
+  const old = $('#msgs');
+  const keepTop = opts.keepScroll && old ? old.scrollTop : null;
+  const hadFocus = document.activeElement && document.activeElement.id === 'input';
+  let html;
+  if (v.name === 'threads') html = threadsView(v.id);
+  else if (v.name === 'chat') html = chatView(v.id);
+  else if (v.name === 'settings') html = settingsView();
+  else if (v.name === 'persona') html = personaView(v.id);
+  else html = homeView();
+  app.innerHTML = html;
+  const input = $('#input');
+  if (input){
+    input.value = S.ui.draft || '';
+    autosize(input);
+    if (hadFocus || opts.focus){ input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+  }
+  const box = $('#msgs');
+  if (box){
+    if (opts.anchor) anchorNow(box);
+    else {
+      layoutAnchor(false);
+      if (keepTop != null) box.scrollTop = keepTop;
+      else box.scrollTop = box.scrollHeight;
+    }
+    watchBox(box);
+  }
+}
+// 送ったメッセージを画面の上に置くための、下の余白の調整
+function layoutAnchor(scroll){
+  const box = $('#msgs'), sp = $('#spacer');
+  if (!box || !sp) return;
+  const el = S.ui.anchor != null ? box.querySelector(`[data-mi="${S.ui.anchor}"]`) : null;
+  if (!el){ sp.style.height = '0px'; return; }
+  sp.style.height = '0px';
+  const below = box.scrollHeight - el.offsetTop;
+  sp.style.height = Math.max(0, box.clientHeight - below - 4) + 'px';
+  if (scroll) box.scrollTop = Math.max(0, el.offsetTop - 12);
+}
+// 送った直後は、キーボードが閉じたりフォントが読み込まれたりして高さが変わるので、少し後にもう一度合わせる
+function anchorNow(box){
+  layoutAnchor(true);
+  let mine = box.scrollTop;
+  (window.requestAnimationFrame || (f => setTimeout(f, 16)))(() => { if (box.scrollTop === mine){ layoutAnchor(true); mine = box.scrollTop; } });
+  setTimeout(() => { if (box.isConnected && box.scrollTop === mine) layoutAnchor(true); }, 400);
+}
+// キーボードが出て会話の枠が縮んだら、そのぶん上にずらす（下の端をそろえる）
+// 送ったメッセージを上に置いているときは、上の端をそろえたまま余白だけ合わせ直す
+let boxObserver = null;
+function watchBox(box){
+  if (!window.ResizeObserver) return;
+  if (boxObserver) boxObserver.disconnect();
+  let lastH = box.clientHeight;
+  boxObserver = new ResizeObserver(() => {
+    const h = box.clientHeight;
+    if (h === lastH) return;
+    if (S.ui.anchor != null){ const top = box.scrollTop; layoutAnchor(false); box.scrollTop = top; }
+    else box.scrollTop += (lastH - h);
+    lastH = h;
+  });
+  boxObserver.observe(box);
+}
+function autosize(el){ el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, window.innerHeight * 0.38) + 'px'; }
+function updateStream(){
+  const el = $('#streamText');
+  const box = $('#msgs');
+  if (!el || !box) return;
+  const top = box.scrollTop;
+  el.innerHTML = fmt(S.stream.text);
+  layoutAnchor(false);
+  box.scrollTop = top; // 流れている間は勝手にスクロールしない
+}
+function toast(msg){
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg; t.setAttribute('role', 'status');
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 1600);
+}
+
+/* ===== Claudeに送る ===== */
+function buildBody(p, msgs, o){
+  const cc = o.ttl ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
+  const system = [];
+  if ((p.instructions || '').trim()) system.push({ type: 'text', text: p.instructions });
+  const kn = (p.knowledge || []).filter(k => k.text.trim()).map(k => `【${k.name}】\n${k.text}`).join('\n\n');
+  if (kn) system.push({ type: 'text', text: kn });
+  const prefs = (S.settings.userPrefs || '').trim();
+  if (prefs) system.push({ type: 'text', text: `【アリサが自分で書いた個人設定】\n${prefs}` });
+  // カスタム指示とナレッジは毎回同じなので、ここまでをキャッシュ
+  if (system.length) system[system.length - 1].cache_control = cc;
+  // 日付はキャッシュの外（1日1回しか変わらない）
+  if (S.settings.sendDate) system.push({ type: 'text', text: `今日の日付：${jpDate()}` });
+
+  // 同じ側が続いたらひとつにまとめる（送信失敗のあとなど）
+  const messages = [];
+  for (const m of msgs){
+    const last = messages[messages.length - 1];
+    if (last && last.role === m.role) last.content[0].text += '\n\n' + m.text;
+    else messages.push({ role: m.role, content: [{ type: 'text', text: m.text }] });
+  }
+  while (messages.length && messages[0].role !== 'user') messages.shift();
+  // 会話の最後にもキャッシュの印（次の返事でそこまでを読み直せる）
+  if (messages.length) messages[messages.length - 1].content[0].cache_control = cc;
+
+  const body = { model: p.model, max_tokens: MAX_TOKENS, stream: true, messages };
+  if (o.think) body.thinking = { type: 'adaptive' };
+  if (system.length) body.system = system;
+  return body;
+}
+
+function friendly(status, msg = '', type = ''){
+  if (/credit|balance/i.test(msg)) return 'クレジットが足りないみたい。開発者サイトで残高を確かめてね';
+  if (status === 401) return 'APIキーが違うみたい。設定で貼り直してね';
+  if (status === 403) return 'このキーでは使えないみたい。キーとモデルを確かめてね';
+  if (status === 404 || /model/i.test(msg) && status === 400) return 'モデルが見つからないみたい。お部屋の設定でモデル名を確かめてね';
+  if (status === 413 || /too long|too large/i.test(msg)) return '送る量が大きすぎたみたい。新しいチャットにしてね';
+  if (status === 429) return '短い間に送りすぎたみたい。少し待ってからもう一度送ってね';
+  if (status === 529 || type === 'overloaded_error' || /overloaded/i.test(msg)) return '混みあってて返事が来なかったよ。もう一度送ってね';
+  if (status >= 500) return '向こう側で問題が起きたみたい。少し待ってからもう一度送ってね';
+  return 'うまく返事が来なかったよ';
+}
+function mkErr(message, detail){ const e = new Error(message); e.detail = detail; return e; }
+
+async function callClaude(p, msgs, signal, onText, usage, o = { ttl: true, think: p.think !== false }){
+  let res;
+  try {
+    res = await fetch(API_URL, {
+      method: 'POST', signal,
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': S.settings.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify(buildBody(p, msgs, o)),
+    });
+  } catch (e){
+    if (e.name === 'AbortError') throw e;
+    throw mkErr('通信できなかったよ。電波を確かめて、もう一度送ってね', e.message);
+  }
+  if (!res.ok){
+    let j = null; try { j = await res.json(); } catch(e){}
+    const msg = (j && j.error && j.error.message) || '';
+    // キャッシュ1時間が受け付けられなかったときは、普通のキャッシュで送り直す
+    if (res.status === 400 && o.ttl && /ttl/i.test(msg)) return callClaude(p, msgs, signal, onText, usage, { ...o, ttl: false });
+    // 「考える」の指定が受け付けられなかったときは、指定なしで送り直す
+    if (res.status === 400 && o.think && /thinking|adaptive/i.test(msg)) return callClaude(p, msgs, signal, onText, usage, { ...o, think: false });
+    throw mkErr(friendly(res.status, msg, j && j.error && j.error.type), `${res.status} ${msg}`);
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '', text = '', stop = null;
+  const handle = ev => {
+    if (ev.type === 'message_start' && ev.message && ev.message.usage) Object.assign(usage, ev.message.usage);
+    else if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta'){ text += ev.delta.text; onText(text); }
+    else if (ev.type === 'message_delta'){ if (ev.usage) Object.assign(usage, ev.usage); if (ev.delta) stop = ev.delta.stop_reason || stop; }
+    else if (ev.type === 'error'){ const m = (ev.error && ev.error.message) || ''; throw mkErr(friendly(0, m, ev.error && ev.error.type), m); }
+  };
+  while (true){
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true }).replace(/\r/g, '');
+    let i;
+    while ((i = buf.indexOf('\n\n')) >= 0){
+      const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+      for (const line of chunk.split('\n')){
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (!data) continue;
+        let ev; try { ev = JSON.parse(data); } catch(e){ continue; }
+        handle(ev);
+      }
+    }
+  }
+  if (!text.trim() && stop === 'refusal') throw mkErr('この内容には返事できないと判断されたみたい', 'stop_reason: refusal');
+  return { text, stop };
+}
+
+function addCost(p, u){
+  if (!u) return;
+  const inP = (Number(p.priceIn) || 10) / 1e6, outP = (Number(p.priceOut) || 50) / 1e6;
+  const cc = u.cache_creation || null;
+  const c1h = cc ? (cc.ephemeral_1h_input_tokens || 0) : (u.cache_creation_input_tokens || 0);
+  const c5m = cc ? (cc.ephemeral_5m_input_tokens || 0) : 0;
+  const cost = (u.input_tokens || 0) * inP + c1h * inP * 2 + c5m * inP * 1.25
+    + (u.cache_read_input_tokens || 0) * inP * 0.1 + (u.output_tokens || 0) * outP;
+  const k = monthKey();
+  S.usage[k] = (S.usage[k] || 0) + cost;
+  saveUsage();
+}
+
+async function runAssistant(cid){
+  const c = chat(cid), p = persona(c.personaId);
+  const msgs = await getMsgs(cid);
+  if (!S.settings.apiKey){ S.ui.error = { chatId: cid, message: '設定でAPIキーを貼ってね', retry: true }; render(); return; }
+  const usage = {};
+  S.stream = { chatId: cid, text: '', ctrl: new AbortController() };
+  S.ui.error = null;
+  for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user'){ S.ui.anchor = i; break; }
+  render({ anchor: true });
+  try {
+    const r = await callClaude(p, msgs, S.stream.ctrl.signal, t => { if (S.stream){ S.stream.text = t; updateStream(); } }, usage);
+    addCost(p, usage);
+    if (r.text.trim()){
+      const m = { role: 'assistant', text: r.text, ts: Date.now() };
+      if (r.stop === 'max_tokens') m.stopped = true;
+      msgs.push(m);
+    } else {
+      S.ui.error = { chatId: cid, message: '返事が空っぽで返ってきたよ。もう一度送ってね', retry: true };
+    }
+  } catch (e){
+    addCost(p, usage);
+    if (e.name === 'AbortError'){
+      const t = S.stream && S.stream.text;
+      if (t && t.trim()) msgs.push({ role: 'assistant', text: t, ts: Date.now(), stopped: true });
+    } else {
+      S.ui.error = { chatId: cid, message: e.message, detail: e.detail, retry: true };
+    }
+  } finally {
+    S.stream = null;
+    c.updatedAt = Date.now();
+    await saveMsgs(cid); await saveChats();
+    render({ keepScroll: true });
+  }
+}
+
+/* ===== 操作 ===== */
+const actions = {
+  back(){ history.back(); },
+  settings(){ go({ name: 'settings' }); },
+  openPersona(t){ go({ name: 'threads', id: t.dataset.id }); },
+  editPersona(t){ go({ name: 'persona', id: t.dataset.id }); },
+  newPersona(){ go({ name: 'persona', id: 'new' }); },
+  async newChat(t){
+    const p = persona(t.dataset.id);
+    const c = { id: uid(), personaId: p.id, no: p.nextNo || 1, start: ymd(), updatedAt: Date.now() };
+    p.nextNo = c.no + 1;
+    S.chats.push(c); S.msgs[c.id] = [];
+    await savePersonas(); await saveChats(); await saveMsgs(c.id);
+    go({ name: 'chat', id: c.id });
+  },
+  async openChat(t){
+    await getMsgs(t.dataset.id);
+    go({ name: 'chat', id: t.dataset.id });
+  },
+  async deleteChat(t){
+    if (await removeChat(t.dataset.id)) history.back();
+  },
+  async send(){
+    const input = $('#input');
+    const text = input.value.trim();
+    if (!text || S.stream) return;
+    const cid = S.view.id;
+    const msgs = await getMsgs(cid);
+    if (S.ui.editIndex != null){ msgs.splice(S.ui.editIndex); S.ui.editIndex = null; }
+    msgs.push({ role: 'user', text, ts: Date.now() });
+    S.ui.draft = ''; S.ui.userActions = null;
+    chat(cid).updatedAt = Date.now();
+    await saveMsgs(cid); await saveChats();
+    runAssistant(cid);
+  },
+  stop(){ if (S.stream) S.stream.ctrl.abort(); },
+  async retry(){
+    const msgs = await getMsgs(S.view.id);
+    if (msgs.length && msgs[msgs.length - 1].role === 'user') runAssistant(S.view.id);
+    else { S.ui.error = null; render(); }
+  },
+  async regen(){
+    const cid = S.view.id;
+    const msgs = await getMsgs(cid);
+    while (msgs.length && msgs[msgs.length - 1].role === 'assistant') msgs.pop();
+    await saveMsgs(cid);
+    runAssistant(cid);
+  },
+  tapMine(t){
+    const i = Number(t.dataset.i);
+    S.ui.userActions = S.ui.userActions === i ? null : i;
+    render({ keepScroll: true });
+  },
+  editMsg(t){
+    const i = Number(t.dataset.i);
+    S.ui.editIndex = i; S.ui.userActions = null;
+    S.ui.draft = S.msgs[S.view.id][i].text;
+    render({ keepScroll: true, focus: true });
+  },
+  cancelEdit(){ S.ui.editIndex = null; S.ui.draft = ''; render({ keepScroll: true }); },
+  async copy(t){
+    const m = S.msgs[S.view.id][Number(t.dataset.i)];
+    try { await navigator.clipboard.writeText(m.text); toast('コピーしたよ'); }
+    catch(e){ toast('コピーできなかったよ'); }
+    S.ui.userActions = null;
+    render({ keepScroll: true });
+  },
+  toggleKey(){ S.ui.showKey = !S.ui.showKey; render(); },
+  async saveAll(){
+    S.settings.apiKey = $('#apiKey').value.trim();
+    S.settings.userPrefs = $('#userPrefs').value;
+    const v = Number($('#cap').value); if (v > 0) S.settings.monthlyCap = v;
+    await saveSettings();
+    toast('保存したよ');
+  },
+  pickKnow(){ collectPD(); $('#knowFile').click(); },
+  openPaste(){ collectPD(); S.ui.pasteOpen = true; render(); },
+  closePaste(){ collectPD(); S.ui.pasteOpen = false; render(); },
+  addPaste(){
+    const name = $('#kName').value.trim() || 'メモ';
+    const text = $('#kText').value;
+    collectPD();
+    if (text.trim()) S.ui.pd.knowledge.push({ name, text });
+    S.ui.pasteOpen = false; render();
+  },
+  delKnow(t){ collectPD(); S.ui.pd.knowledge.splice(Number(t.dataset.i), 1); render(); },
+  async savePersona(){
+    collectPD();
+    const d = S.ui.pd;
+    if (!d.name.trim()){ toast('名前を入れてね'); return; }
+    if (!d.model.trim()){ toast('モデルを入れてね'); return; }
+    d.name = d.name.trim(); d.model = d.model.trim();
+    const i = S.personas.findIndex(p => p.id === d.id);
+    if (i >= 0) S.personas[i] = d; else S.personas.push(d);
+    await savePersonas();
+    toast('保存したよ');
+    history.back();
+  },
+  async deletePersona(){
+    const d = S.ui.pd;
+    if (!confirm(`${d.name}のお部屋を消します。チャットも全部消えます。`)) return;
+    if (!confirm('本当に消していい？元には戻せません。')) return;
+    for (const c of S.chats.filter(c => c.personaId === d.id)){ delete S.msgs[c.id]; await DB.del('msgs:' + c.id); }
+    S.chats = S.chats.filter(c => c.personaId !== d.id);
+    S.personas = S.personas.filter(p => p.id !== d.id);
+    await saveChats(); await savePersonas();
+    S.view = { name: 'home' }; S.ui = {};
+    history.replaceState(S.view, '');
+    render();
+  },
+  async backup(){
+    const keys = await DB.keys();
+    const data = {};
+    for (const k of keys) data[k] = await DB.get(k);
+    if (data.settings){ data.settings = Object.assign({}, data.settings); delete data.settings.apiKey; }
+    const out = { app: 'minna-no-oheya', format: BACKUP_FORMAT, version: APP_VERSION, savedAt: new Date().toISOString(), data };
+    const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
+    const d = new Date();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `minna-backup-${String(d.getFullYear()).slice(2)}${pad2(d.getMonth()+1)}${pad2(d.getDate())}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast('バックアップを保存したよ');
+  },
+  restore(){ $('#restoreFile').click(); },
+};
+
+async function removeChat(id){
+  const c = chat(id);
+  if (!c || (S.stream && S.stream.chatId === id)) return false;
+  if (!confirm(`No.${c.no} のチャットを消します。元には戻せません。`)) return false;
+  S.chats = S.chats.filter(x => x.id !== c.id);
+  delete S.msgs[c.id];
+  // 番号を詰める：残ったチャットを古い順に1から振り直す
+  const p = persona(c.personaId);
+  const rest = S.chats.filter(x => x.personaId === c.personaId).sort((a, b) => a.no - b.no);
+  rest.forEach((x, i) => { x.no = i + 1; });
+  if (p){ p.nextNo = rest.length + 1; await savePersonas(); }
+  await DB.del('msgs:' + c.id); await saveChats();
+  return true;
+}
+
+function collectPD(){
+  const d = S.ui.pd;
+  if (!d || !$('#pName')) return;
+  d.name = $('#pName').value;
+  d.initial = $('#pInitial').value;
+  d.model = $('#pModel').value;
+  d.priceIn = Number($('#pIn').value) || 0;
+  d.priceOut = Number($('#pOut').value) || 0;
+  d.instructions = $('#pInst').value;
+  d.think = $('#pThink').checked;
+}
+
+const changes = {
+  apiKey(t){ S.settings.apiKey = t.value.trim(); saveSettings(); toast('キーを保存したよ'); },
+  sendDate(t){ S.settings.sendDate = t.checked; saveSettings(); },
+  userPrefs(t){ S.settings.userPrefs = t.value; saveSettings(); toast('個人設定を保存したよ'); },
+  cap(t){ const v = Number(t.value); if (v > 0){ S.settings.monthlyCap = v; saveSettings(); } },
+  model(t){
+    collectPD();
+    const pr = priceFor(t.value.trim());
+    if (pr){ S.ui.pd.priceIn = pr[0]; S.ui.pd.priceOut = pr[1]; $('#pIn').value = pr[0]; $('#pOut').value = pr[1]; }
+  },
+  async knowFile(t){
+    collectPD();
+    for (const f of t.files){
+      try { S.ui.pd.knowledge.push({ name: f.name.replace(/\.(txt|md)$/i, ''), text: await f.text() }); }
+      catch(e){ toast(`${f.name} が読めなかったよ`); }
+    }
+    render();
+  },
+  async restoreFile(t){
+    const f = t.files[0];
+    if (!f) return;
+    let j;
+    try { j = JSON.parse(await f.text()); } catch(e){ toast('ファイルが読めなかったよ'); return; }
+    if (!j || j.app !== 'minna-no-oheya' || !j.data){ toast('このアプリのバックアップじゃないみたい'); return; }
+    if (!confirm('今のデータを全部、このバックアップの中身に置きかえます。いい？')) return;
+    const key = S.settings.apiKey;
+    await DB.clear();
+    for (const [k, v] of Object.entries(j.data)) await DB.set(k, v);
+    S.msgs = {};
+    await load();
+    S.settings.apiKey = key; await saveSettings();
+    S.view = { name: 'home' }; S.ui = {};
+    history.replaceState(S.view, '');
+    render();
+    toast('バックアップから戻したよ');
+  },
+};
+
+/* ===== イベント ===== */
+app.addEventListener('click', e => {
+  const t = e.target.closest('[data-act]');
+  if (t && actions[t.dataset.act]) actions[t.dataset.act](t, e);
+});
+// チャット一覧の長押しで消す
+app.addEventListener('contextmenu', async e => {
+  const t = e.target.closest('.thread');
+  if (!t) return;
+  e.preventDefault();
+  if (await removeChat(t.dataset.id)) render();
+});
+app.addEventListener('change', e => {
+  const k = e.target.dataset && e.target.dataset.change;
+  if (k && changes[k]) changes[k](e.target, e);
+});
+app.addEventListener('input', e => {
+  const t = e.target;
+  if (t.id === 'input'){ S.ui.draft = t.value; autosize(t); }
+  if (t.id === 'pInst'){ const c = $('#instCount'); if (c) c.textContent = t.value.length + '文字'; }
+  if (t.id === 'userPrefs'){ const c = $('#prefCount'); if (c) c.textContent = t.value.length + '文字'; }
+});
+
+/* ===== はじまり ===== */
+(async () => {
+  try {
+    await load();
+    history.replaceState(S.view, '');
+    render();
+  } catch (e){
+    app.innerHTML = `<div class="pad"><div class="err">データを開けませんでした。ブラウザの設定で、このサイトの保存が止められていないか確かめてください。<div class="detail">${esc(e.message)}</div></div></div>`;
+  }
+})();
+</script>
+</body>
+</html>
