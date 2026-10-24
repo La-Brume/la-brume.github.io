@@ -147,7 +147,7 @@ textarea.t.small{min-height:120px}
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.5';
+const APP_VERSION = '0.5.1';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -664,7 +664,11 @@ function buildBody(p, apiMsgs, o){
     lastC[lastC.length - 1].cache_control = cc;
   }
   const body = { model: p.model, max_tokens: MAX_TOKENS, stream: true, system, messages, tools: TOOLS };
-  if (o.think) body.thinking = { type: 'adaptive' };
+  if (o.think){
+    body.thinking = { type: 'adaptive' };
+    // 考えた中身は省略されて返ってくることがあるので、要約を返すように頼む
+    if (o.display) body.thinking.display = 'summarized';
+  }
   return body;
 }
 
@@ -705,6 +709,8 @@ async function callClaude(p, apiMsgs, signal, onText, usage, o){
     // キャッシュ1時間が受け付けられなかったときは、普通のキャッシュで送り直す
     if (res.status === 400 && o.ttl && /ttl/i.test(msg)){ o.ttl = false; return callClaude(p, apiMsgs, signal, onText, usage, o); }
     // 「考える」の指定が受け付けられなかったときは、指定なしで送り直す
+    // 「要約を返して」が受け付けられなかったときは、それだけ外して送り直す
+    if (res.status === 400 && o.display && /display|summar/i.test(msg)){ o.display = false; return callClaude(p, apiMsgs, signal, onText, usage, o); }
     if (res.status === 400 && o.think && /thinking|adaptive/i.test(msg)){ o.think = false; return callClaude(p, apiMsgs, signal, onText, usage, o); }
     throw mkErr(friendly(res.status, msg, j && j.error && j.error.type), `${res.status} ${msg}`);
   }
@@ -756,7 +762,7 @@ async function callClaude(p, apiMsgs, signal, onText, usage, o){
 // 返事をもらう。メモリの道具が使われたら、結果を返してもう一度（最大4回）
 async function converse(p, msgs, signal, onText){
   const apiMsgs = toApiMessages(msgs);
-  const o = { ttl: true, think: p.think !== false };
+  const o = { ttl: true, think: p.think !== false, display: true };
   let shown = '', thoughts = '';
   const notes = [];
   for (let round = 0; round < 4; round++){
