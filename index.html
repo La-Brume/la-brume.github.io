@@ -130,7 +130,7 @@ textarea.t.small{min-height:120px}
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.2.4';
+const APP_VERSION = '0.3';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -140,7 +140,7 @@ const MAX_TOKENS = 32000;
 const MODELS = [
   ['claude-fable-5-1', 10, 50],
   ['claude-fable-5',   10, 50],
-  ['claude-opus-5-5',   5, 25],
+  ['claude-opus-5-5',   4, 20],
   ['claude-opus-5',     5, 25],
   ['claude-sonnet-5-5', 2, 10],
   ['claude-haiku-5-5',  1,  5],
@@ -223,7 +223,7 @@ const S = {
 
 function newPersona(name, initial, model){
   const p = priceFor(model) || [10, 50];
-  return { id: uid(), name, initial, model, priceIn: p[0], priceOut: p[1], instructions: '', knowledge: [], nextNo: 1 };
+  return { id: uid(), name, initial, model, priceIn: p[0], priceOut: p[1], instructions: '', think: true, knowledge: [], memory: '', nextNo: 1 };
 }
 
 async function load(){
@@ -328,6 +328,7 @@ function chatView(cid){
       }
     } else {
       h += `<div class="bubble ai${dim}">${fmt(m.text)}</div>`;
+      if (m.notes) h += `<div class="note">${esc(m.notes.join('・'))}</div>`;
       if (m.stopped) h += `<div class="note">途中で止めたよ</div>`;
       if (i === msgs.length - 1 && !streaming && ed == null){
         h += `<div class="acts l"><button class="act icon" data-act="copy" data-i="${i}" aria-label="コピー">${ICON.copy}</button>
@@ -430,6 +431,9 @@ function personaView(id){
     h += `<div class="btns" style="margin-top:8px"><button class="btn ghost" data-act="pickKnow">ファイルから足す</button><button class="btn ghost" data-act="openPaste">貼りつけて足す</button></div>
       <input type="file" id="knowFile" accept=".txt,.md,text/plain,text/markdown" multiple hidden data-change="knowFile">`;
   }
+  h += `<label class="f" for="pMem">メモリ <span id="memCount">${(d.memory || '').length}文字</span></label>
+    <textarea class="t" id="pMem">${esc(d.memory || '')}</textarea>
+    <div class="hint">${esc(d.name || 'このひと')}が「覚えといて」「整理しといて」と頼まれたときに書きます。アリサが直接貼ったり直したりもできます。</div>`;
   h += `<div class="section"><button class="btn" data-act="savePersona">保存する</button>`;
   if (!isNew) h += `<button class="btn danger" data-act="deletePersona" style="margin-top:28px">このお部屋を消す</button>`;
   h += `</div></div></div>`;
@@ -494,7 +498,9 @@ function watchBox(box){
   boxObserver = new ResizeObserver(() => {
     const h = box.clientHeight;
     if (h === lastH) return;
-    if (S.ui.anchor != null){ const top = box.scrollTop; layoutAnchor(false); box.scrollTop = top; }
+    // 送ったメッセージを上に置いている間（指で動かしていなければ）は、枠が変わっても上に置き直す
+    if (S.ui.anchor != null && !S.ui.userScrolled) layoutAnchor(true);
+    else if (S.ui.anchor != null){ const top = box.scrollTop; layoutAnchor(false); box.scrollTop = top; }
     else box.scrollTop += (lastH - h);
     lastH = h;
   });
@@ -519,34 +525,83 @@ function toast(msg){
 }
 
 /* ===== Claudeに送る ===== */
-function buildBody(p, msgs, o){
+
+// メモリの道具。みんなが「頼まれたときだけ」使う
+const MEMORY_RULES = 'メモリの書き方：言葉は自分の声で書く（事務的にそろえない）。出来事は全部は残さない。ただし約束など、この先に関わる大事な出来事は残す。変化は必ず残し、「こうしてね→わかった」で終わらせず、何がどう変わったかまで書く。古くなったことは書き足さずに書き換える。その場限りのことや推測は入れない。';
+const TOOLS = [
+  { name: 'memory_add',
+    description: '自分のメモリの最後に書き足す。アリサに「覚えといて」などと頼まれたときだけ使う。自分の判断では使わない。すでに書いてあることの更新なら memory_replace を使う。' + MEMORY_RULES,
+    input_schema: { type: 'object', properties: { text: { type: 'string', description: '書き足す内容' } }, required: ['text'] } },
+  { name: 'memory_replace',
+    description: '自分のメモリの一部を書きかえる。進展や変化があったときに、古い文を新しい文に置きかえる。アリサに頼まれたときだけ使う。' + MEMORY_RULES,
+    input_schema: { type: 'object', properties: { old_text: { type: 'string', description: 'メモリにある、書きかえたい文（そのまま写す）' }, new_text: { type: 'string', description: '新しい文' } }, required: ['old_text', 'new_text'] } },
+  { name: 'memory_rewrite',
+    description: '自分のメモリ全体を整理して書き直す。アリサに「整理しといて」などと頼まれたときだけ使う。大事なことを落とさないこと。' + MEMORY_RULES,
+    input_schema: { type: 'object', properties: { content: { type: 'string', description: '整理したあとのメモリ全体' } }, required: ['content'] } },
+];
+function runMemTool(p, name, input){
+  input = input || {};
+  const mem = p.memory || '';
+  if (name === 'memory_add'){
+    const t = String(input.text || '').trim();
+    if (!t) return { msg: '書き足す内容が空でした。', note: null };
+    p.memory = (mem.trim() ? mem.replace(/\s+$/, '') + '\n' : '') + t;
+    return { msg: 'メモリに書き足しました。', note: 'メモリに書いたよ' };
+  }
+  if (name === 'memory_replace'){
+    const o = String(input.old_text || ''), n = String(input.new_text || '');
+    if (!o || !mem.includes(o)) return { msg: 'その文はメモリに見つかりませんでした。メモリにある文をそのまま写してください。', note: null };
+    p.memory = mem.replace(o, n);
+    return { msg: 'メモリを書きかえました。', note: 'メモリを書きかえたよ' };
+  }
+  if (name === 'memory_rewrite'){
+    const c = String(input.content || '').trim();
+    if (!c) return { msg: '中身が空だったので、書き直していません。', note: null };
+    p.memory = c;
+    return { msg: 'メモリを整理して書き直しました。', note: 'メモリを整理したよ' };
+  }
+  return { msg: 'その道具はありません。', note: null };
+}
+
+// 保存してある会話を、APIに送る形にする
+function toApiMessages(msgs){
+  const out = [];
+  for (const m of msgs){
+    const last = out[out.length - 1];
+    // 同じ側が続いたらひとつにまとめる（送信失敗のあとなど）
+    if (last && last.role === m.role) last.content[0].text += '\n\n' + m.text;
+    else out.push({ role: m.role, content: [{ type: 'text', text: m.text }] });
+  }
+  while (out.length && out[0].role !== 'user') out.shift();
+  return out;
+}
+
+function buildBody(p, apiMsgs, o){
   const cc = o.ttl ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
+  // 並び順：個人設定 → カスタム指示 → ナレッジ → メモリ（変わらないものほど前）
   const system = [];
-  // 個人設定はいちばん前（後ろにあるカスタム指示のほうが優先されやすいように）
   const prefs = (S.settings.userPrefs || '').trim();
   if (prefs) system.push({ type: 'text', text: `【アリサが自分で書いた個人設定】\n${prefs}` });
   if ((p.instructions || '').trim()) system.push({ type: 'text', text: p.instructions });
   const kn = (p.knowledge || []).filter(k => k.text.trim()).map(k => `【${k.name}】\n${k.text}`).join('\n\n');
   if (kn) system.push({ type: 'text', text: kn });
-  // 個人設定・カスタム指示・ナレッジは毎回同じなので、ここまでをキャッシュ
+  // メモリの手前にもキャッシュの印。メモリが書きかわっても、ここまでは読み直しで済む
   if (system.length) system[system.length - 1].cache_control = cc;
+  const mem = (p.memory || '').trim();
+  system.push({ type: 'text', text: `【${p.name}のメモリ（自分で書いたもの）】\n${mem || '（まだ何も書いていない）'}` });
+  // ここまでをキャッシュ
+  system[system.length - 1].cache_control = cc;
   // 日付はキャッシュの外（1日1回しか変わらない）
   if (S.settings.sendDate) system.push({ type: 'text', text: `今日の日付：${jpDate()}` });
 
-  // 同じ側が続いたらひとつにまとめる（送信失敗のあとなど）
-  const messages = [];
-  for (const m of msgs){
-    const last = messages[messages.length - 1];
-    if (last && last.role === m.role) last.content[0].text += '\n\n' + m.text;
-    else messages.push({ role: m.role, content: [{ type: 'text', text: m.text }] });
+  // 会話の最後にだけキャッシュの印（次の返事でそこまでを読み直せる）
+  const messages = apiMsgs.map(m => ({ role: m.role, content: m.content.map(b => { const c = Object.assign({}, b); delete c.cache_control; return c; }) }));
+  if (messages.length){
+    const lastC = messages[messages.length - 1].content;
+    lastC[lastC.length - 1].cache_control = cc;
   }
-  while (messages.length && messages[0].role !== 'user') messages.shift();
-  // 会話の最後にもキャッシュの印（次の返事でそこまでを読み直せる）
-  if (messages.length) messages[messages.length - 1].content[0].cache_control = cc;
-
-  const body = { model: p.model, max_tokens: MAX_TOKENS, stream: true, messages };
+  const body = { model: p.model, max_tokens: MAX_TOKENS, stream: true, system, messages, tools: TOOLS };
   if (o.think) body.thinking = { type: 'adaptive' };
-  if (system.length) body.system = system;
   return body;
 }
 
@@ -563,7 +618,8 @@ function friendly(status, msg = '', type = ''){
 }
 function mkErr(message, detail){ const e = new Error(message); e.detail = detail; return e; }
 
-async function callClaude(p, msgs, signal, onText, usage, o = { ttl: true, think: p.think !== false }){
+// 1回分の送受信。返ってきた中身（考えた部分・文・道具の呼び出し）をそのまま返す
+async function callClaude(p, apiMsgs, signal, onText, usage, o){
   let res;
   try {
     res = await fetch(API_URL, {
@@ -574,7 +630,7 @@ async function callClaude(p, msgs, signal, onText, usage, o = { ttl: true, think
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
       },
-      body: JSON.stringify(buildBody(p, msgs, o)),
+      body: JSON.stringify(buildBody(p, apiMsgs, o)),
     });
   } catch (e){
     if (e.name === 'AbortError') throw e;
@@ -584,17 +640,33 @@ async function callClaude(p, msgs, signal, onText, usage, o = { ttl: true, think
     let j = null; try { j = await res.json(); } catch(e){}
     const msg = (j && j.error && j.error.message) || '';
     // キャッシュ1時間が受け付けられなかったときは、普通のキャッシュで送り直す
-    if (res.status === 400 && o.ttl && /ttl/i.test(msg)) return callClaude(p, msgs, signal, onText, usage, { ...o, ttl: false });
+    if (res.status === 400 && o.ttl && /ttl/i.test(msg)){ o.ttl = false; return callClaude(p, apiMsgs, signal, onText, usage, o); }
     // 「考える」の指定が受け付けられなかったときは、指定なしで送り直す
-    if (res.status === 400 && o.think && /thinking|adaptive/i.test(msg)) return callClaude(p, msgs, signal, onText, usage, { ...o, think: false });
+    if (res.status === 400 && o.think && /thinking|adaptive/i.test(msg)){ o.think = false; return callClaude(p, apiMsgs, signal, onText, usage, o); }
     throw mkErr(friendly(res.status, msg, j && j.error && j.error.type), `${res.status} ${msg}`);
   }
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = '', text = '', stop = null;
+  const blocks = [];
   const handle = ev => {
     if (ev.type === 'message_start' && ev.message && ev.message.usage) Object.assign(usage, ev.message.usage);
-    else if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta'){ text += ev.delta.text; onText(text); }
+    else if (ev.type === 'content_block_start'){
+      const b = Object.assign({}, ev.content_block);
+      if (b.type === 'tool_use'){ b._json = ''; b.input = {}; }
+      blocks[ev.index] = b;
+    }
+    else if (ev.type === 'content_block_delta' && ev.delta){
+      const b = blocks[ev.index], d = ev.delta;
+      if (d.type === 'text_delta'){ text += d.text; if (b) b.text = (b.text || '') + d.text; onText(text); }
+      else if (d.type === 'thinking_delta' && b) b.thinking = (b.thinking || '') + d.thinking;
+      else if (d.type === 'signature_delta' && b) b.signature = (b.signature || '') + d.signature;
+      else if (d.type === 'input_json_delta' && b) b._json += d.partial_json;
+    }
+    else if (ev.type === 'content_block_stop'){
+      const b = blocks[ev.index];
+      if (b && b.type === 'tool_use'){ try { b.input = b._json ? JSON.parse(b._json) : {}; } catch(e){ b.input = {}; } delete b._json; }
+    }
     else if (ev.type === 'message_delta'){ if (ev.usage) Object.assign(usage, ev.usage); if (ev.delta) stop = ev.delta.stop_reason || stop; }
     else if (ev.type === 'error'){ const m = (ev.error && ev.error.message) || ''; throw mkErr(friendly(0, m, ev.error && ev.error.type), m); }
   };
@@ -615,17 +687,51 @@ async function callClaude(p, msgs, signal, onText, usage, o = { ttl: true, think
     }
   }
   if (!text.trim() && stop === 'refusal') throw mkErr('この内容には返事できないと判断されたみたい', 'stop_reason: refusal');
-  return { text, stop };
+  return { blocks: blocks.filter(Boolean), text, stop };
 }
 
+// 返事をもらう。メモリの道具が使われたら、結果を返してもう一度（最大4回）
+async function converse(p, msgs, signal, onText){
+  const apiMsgs = toApiMessages(msgs);
+  const o = { ttl: true, think: p.think !== false };
+  let shown = '';
+  const notes = [];
+  for (let round = 0; round < 4; round++){
+    const sep = shown.trim() ? '\n\n' : '';
+    const usage = {};
+    let r;
+    try {
+      r = await callClaude(p, apiMsgs, signal, t => onText(shown + sep + t), usage, o);
+    } catch (e){
+      addCost(p, usage);
+      e.partial = shown; e.notes = notes;
+      throw e;
+    }
+    addCost(p, usage);
+    if (r.text.trim()) shown += sep + r.text;
+    if (r.stop !== 'tool_use') return { text: shown, stop: r.stop, notes };
+    const results = [];
+    for (const b of r.blocks.filter(b => b.type === 'tool_use')){
+      const res = runMemTool(p, b.name, b.input);
+      if (res.note) notes.push(res.note);
+      results.push({ type: 'tool_result', tool_use_id: b.id, content: res.msg });
+    }
+    await savePersonas();
+    apiMsgs.push({ role: 'assistant', content: r.blocks });
+    apiMsgs.push({ role: 'user', content: results });
+  }
+  return { text: shown, stop: 'end_turn', notes };
+}
+
+function readMult(model){ return model === 'claude-opus-5-5' ? 0.05 : 0.1; }
 function addCost(p, u){
-  if (!u) return;
+  if (!u || (!u.input_tokens && !u.output_tokens && !u.cache_read_input_tokens && !u.cache_creation_input_tokens)) return;
   const inP = (Number(p.priceIn) || 10) / 1e6, outP = (Number(p.priceOut) || 50) / 1e6;
   const cc = u.cache_creation || null;
   const c1h = cc ? (cc.ephemeral_1h_input_tokens || 0) : (u.cache_creation_input_tokens || 0);
   const c5m = cc ? (cc.ephemeral_5m_input_tokens || 0) : 0;
   const cost = (u.input_tokens || 0) * inP + c1h * inP * 2 + c5m * inP * 1.25
-    + (u.cache_read_input_tokens || 0) * inP * 0.1 + (u.output_tokens || 0) * outP;
+    + (u.cache_read_input_tokens || 0) * inP * readMult(p.model) + (u.output_tokens || 0) * outP;
   const k = monthKey();
   S.usage[k] = (S.usage[k] || 0) + cost;
   saveUsage();
@@ -635,24 +741,24 @@ async function runAssistant(cid){
   const c = chat(cid), p = persona(c.personaId);
   const msgs = await getMsgs(cid);
   if (!S.settings.apiKey){ S.ui.error = { chatId: cid, message: '設定でAPIキーを貼ってね', retry: true }; render(); return; }
-  const usage = {};
   S.stream = { chatId: cid, text: '', ctrl: new AbortController() };
   S.ui.error = null;
   for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user'){ S.ui.anchor = i; break; }
   S.ui.userScrolled = false;
   render({ anchor: true });
   try {
-    const r = await callClaude(p, msgs, S.stream.ctrl.signal, t => { if (S.stream){ S.stream.text = t; updateStream(); } }, usage);
-    addCost(p, usage);
+    const r = await converse(p, msgs, S.stream.ctrl.signal, t => { if (S.stream){ S.stream.text = t; updateStream(); } });
     if (r.text.trim()){
       const m = { role: 'assistant', text: r.text, ts: Date.now() };
       if (r.stop === 'max_tokens') m.stopped = true;
+      if (r.notes.length) m.notes = r.notes;
       msgs.push(m);
     } else {
+      if (r.notes.length) toast(r.notes.join('・'));
       S.ui.error = { chatId: cid, message: '返事が空っぽで返ってきたよ。もう一度送ってね', retry: true };
     }
   } catch (e){
-    addCost(p, usage);
+    if (e.notes && e.notes.length) toast(e.notes.join('・'));
     if (e.name === 'AbortError'){
       const t = S.stream && S.stream.text;
       if (t && t.trim()) msgs.push({ role: 'assistant', text: t, ts: Date.now(), stopped: true });
@@ -820,6 +926,7 @@ function collectPD(){
   d.priceOut = Number($('#pOut').value) || 0;
   d.instructions = $('#pInst').value;
   d.think = $('#pThink').checked;
+  d.memory = $('#pMem').value;
 }
 
 const changes = {
@@ -891,6 +998,7 @@ app.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'input'){ S.ui.draft = t.value; autosize(t); }
   if (t.id === 'pInst'){ const c = $('#instCount'); if (c) c.textContent = t.value.length + '文字'; }
+  if (t.id === 'pMem'){ const c = $('#memCount'); if (c) c.textContent = t.value.length + '文字'; }
   if (t.id === 'userPrefs'){ const c = $('#prefCount'); if (c) c.textContent = t.value.length + '文字'; }
 });
 
