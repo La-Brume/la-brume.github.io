@@ -21,7 +21,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Playfair+Display:wght@500&display=swap">
 <style>
 :root{
   --bg:#2B2A27; --surface:#393834; --surface2:#4A4843;
@@ -159,6 +159,48 @@ textarea.t.small{min-height:120px}
 .section h2{font-size:15px;margin:12px 0 4px}
 .hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.6}
 .toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--accent);color:var(--onaccent);padding:8px 16px;border-radius:999px;font-size:14px;z-index:10}
+.mchip{border:none;cursor:pointer}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:20;animation:fadein .2s}
+.sheet{position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;background:#232220;border-radius:24px 24px 0 0;z-index:21;height:58vh;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px);animation:slideup .22s ease-out;transition:height .2s ease}
+.sheet.full{height:calc(100% - env(safe-area-inset-top,0px) - 12px)}
+.sheet.fit{height:auto;max-height:85vh}
+.grab{width:44px;height:5px;border-radius:3px;background:rgba(255,255,255,.22);margin:8px auto 0;flex-shrink:0}
+.shead{display:flex;align-items:center;padding:2px 6px;flex-shrink:0;touch-action:none}
+.shead h2{flex:1;text-align:center;font-size:16px;margin:0}
+.sbody{flex:1;overflow-y:auto;padding:6px 16px 20px;-webkit-overflow-scrolling:touch}
+.mlist{background:var(--surface);border-radius:16px;overflow:hidden}
+.mrow{display:flex;align-items:center;width:100%;min-height:56px;padding:0 18px;border:none;background:none;color:var(--text);font-size:16px;text-align:left;border-bottom:1px solid rgba(255,255,255,.06)}
+.mrow:last-child{border-bottom:none}
+.mrow:active{background:var(--surface2)}
+.mrow .grow{flex:1}
+.mrow .ck{color:#9DB8E3;display:flex}
+.thinktext{font-size:14px;line-height:1.8;color:var(--text);white-space:pre-wrap;word-break:break-word}
+@keyframes slideup{from{transform:translateY(100%)}to{transform:none}}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+@keyframes slidein{from{transform:translateX(-100%)}to{transform:none}}
+.drawer{position:fixed;top:0;bottom:0;left:0;width:min(84vw,330px);background:#1F1E1C;z-index:21;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);animation:slidein .22s ease-out}
+.brand{font-family:'Playfair Display',serif;font-weight:500;font-size:26px;padding:22px 20px 8px;color:var(--text)}
+.brand-h{font-family:'Playfair Display',serif;font-weight:500}
+.dbody{flex:1;overflow-y:auto;padding:0 10px}
+.dsec{font-size:12px;color:var(--muted);padding:18px 12px 6px}
+.drow{display:flex;align-items:center;gap:12px;width:100%;min-height:48px;padding:6px 12px;border:none;background:none;color:var(--text);text-align:left;border-radius:12px;font-size:15px}
+.drow:active{background:var(--surface)}
+.drow .grow{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dfoot{display:flex;align-items:center;gap:6px;padding:10px 10px;border-top:1px solid var(--line)}
+.dfoot .sub{flex:1}
+.sec{margin-top:30px}
+.sec:first-child{margin-top:4px}
+.sec>h2{font-size:13px;color:var(--muted);font-weight:500;margin:0 0 8px}
+.sec .hint{margin-top:6px}
+.srow{display:flex;align-items:center;gap:14px;min-height:56px;padding:8px 0;cursor:pointer}
+.srow .stext{flex:1;display:flex;flex-direction:column;gap:2px}
+.sname{font-size:15px}
+.ssub{font-size:12px;color:var(--muted);line-height:1.5}
+input.switch{-webkit-appearance:none;appearance:none;width:50px;height:30px;border-radius:15px;background:var(--surface2);position:relative;flex-shrink:0;transition:background .2s;margin:0;cursor:pointer}
+input.switch::before{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:12px;background:#CFC8BC;transition:transform .2s}
+input.switch:checked{background:var(--accent)}
+input.switch:checked::before{transform:translateX(20px);background:var(--onaccent)}
+@media (prefers-reduced-motion:reduce){.sheet,.drawer,.scrim{animation:none}}
 @media (prefers-reduced-motion:reduce){.dots i{animation:none;opacity:.6}}
 </style>
 </head>
@@ -168,7 +210,7 @@ textarea.t.small{min-height:120px}
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.8.3';
+const APP_VERSION = '0.9';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -207,6 +249,15 @@ function shortDate(iso){
 }
 function jpDate(d = new Date()){ return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${WD[d.getDay()]}）`; }
 function monthKey(d = new Date()){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}`; }
+// 「今回」の区切り：クレジットの請求期間に合わせる（初期は22日〜翌21日）。キーは区切りが始まった月
+function periodStart(d = new Date()){
+  const cd = Math.min(28, Math.max(1, Number(S.settings && S.settings.cycleDay) || 22));
+  let y = d.getFullYear(), m = d.getMonth();
+  if (d.getDate() < cd){ m -= 1; if (m < 0){ m = 11; y -= 1; } }
+  return { y, m, cd };
+}
+function periodKey(d = new Date()){ const p = periodStart(d); return `${p.y}-${pad2(p.m + 1)}`; }
+function periodLabel(){ const p = periodStart(); return `${p.m + 1}/${p.cd}〜`; }
 const money = n => '$' + (n || 0).toFixed(2);
 // 空行で段落に分けて表示する（空行がそのまま大きなすき間にならないように）
 // （）の中（しぐさ）は少し薄い色にする
@@ -225,6 +276,9 @@ function spaceActs(t){
 const fmt = t => spaceActs(String(t || '').replace(/^\s+|\s+$/g, '')).split(/\n[ \t\u3000]*\n+/).map(p => `<p>${deco(esc(p))}</p>`).join('');
 
 const ICON = {
+  menu:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h11M4 17h7"/></svg>',
+  x:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  check:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   more:'<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="19" cy="12" r="1.8" fill="currentColor"/></svg>',
   plus:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   down:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
@@ -284,7 +338,7 @@ function newPersona(name, initial, model){
 
 async function load(){
   await DB.open();
-  S.settings = Object.assign({ apiKey: '', sendDate: true, monthlyCap: 100, userPrefs: '', showThink: false, cutChars: 60000 }, (await DB.get('settings')) || {});
+  S.settings = Object.assign({ apiKey: '', sendDate: true, monthlyCap: 100, userPrefs: '', showThink: false, cutChars: 60000, cycleDay: 22 }, (await DB.get('settings')) || {});
   S.personas = (await DB.get('personas')) || [];
   S.chats = (await DB.get('chats')) || [];
   S.usage = (await DB.get('usage')) || {};
@@ -305,7 +359,7 @@ async function getMsgs(cid){
 const saveMsgs = cid => DB.set('msgs:' + cid, S.msgs[cid] || []);
 const persona = id => S.personas.find(p => p.id === id);
 const chat = id => S.chats.find(c => c.id === id);
-const monthUsed = () => S.usage[monthKey()] || 0;
+const monthUsed = () => S.usage[periodKey()] || 0;
 const isWarn = () => monthUsed() >= (Number(S.settings.monthlyCap) || 100) * 0.8;
 const initialOf = p => (p.initial || p.name || '？').slice(0, 2);
 
@@ -326,11 +380,11 @@ window.addEventListener('popstate', async e => {
 function homeView(){
   const used = monthUsed(), cap = Number(S.settings.monthlyCap) || 100;
   const pct = Math.min(100, used / cap * 100);
-  let h = `<div class="top"><div class="title"><h1>La Brume Enchantée</h1></div>
+  let h = `<div class="top"><button class="iconbtn" data-act="openDrawer" aria-label="メニュー">${ICON.menu}</button><div class="title"><h1 class="brand-h">La Brume Enchantée</h1></div>
     <button class="iconbtn" data-act="settings" aria-label="設定">${ICON.gear}</button></div>
     <div class="scroll"><div class="pad">`;
   if (!S.settings.apiKey) h += `<div class="notice">設定でAPIキーを貼ると、話せるようになるよ</div>`;
-  h += `<div class="card ${isWarn() ? 'warn' : ''}"><div class="usage-top"><span class="sub">今月の使用額</span>
+  h += `<div class="card ${isWarn() ? 'warn' : ''}"><div class="usage-top"><span class="sub">今回の使用額（${periodLabel()}）</span>
     <span><span class="amount">${money(used)}</span> <span class="sub">/ ${money(cap)}</span></span></div>
     <div class="bar"><div style="width:${pct}%"></div></div></div>`;
   for (const p of S.personas){
@@ -368,6 +422,42 @@ function updateCompact(){
   const cb = document.querySelector('.cbox');
   if (cb) cb.classList.toggle('compact', composerCompact());
 }
+// ===== 下から出てくる画面（モデルを選ぶ・考えたこと） =====
+function sheetHtml(){
+  const sh = S.ui.sheet, c = chat(S.view.id), p = c && persona(c.personaId);
+  if (!sh || !p) return '';
+  let title = '', body = '', cls = '';
+  if (sh.type === 'model'){
+    title = 'モデルを選択'; cls = 'fit';
+    body = `<div class="mlist">${MODELS.map(m => `<button class="mrow" data-act="pickModel" data-m="${m[0]}"><span class="grow">${esc(m[3])}</span>${m[0] === p.model ? `<span class="ck">${ICON.check}</span>` : ''}</button>`).join('')}</div>
+      <div class="mlist" style="margin-top:12px">${sh.custom
+        ? `<div style="padding:12px"><input class="t" id="customModel" placeholder="モデル名（claude-…）" value="${priceFor(p.model) ? '' : esc(p.model)}" autocomplete="off" spellcheck="false" aria-label="モデル名"><button class="btn" data-act="pickCustomModel" style="margin-top:10px">これにする</button></div>`
+        : `<button class="mrow" data-act="customModel"><span class="grow">ほかのモデル${priceFor(p.model) ? '' : `（${esc(p.model)}）`}</span>${priceFor(p.model) ? ICON.chev : `<span class="ck">${ICON.check}</span>`}</button>`}</div>`;
+  } else if (sh.type === 'think'){
+    title = '考えたこと'; cls = sh.full ? 'full' : '';
+    const m = (S.msgs[c.id] || [])[sh.i];
+    const text = !m ? '' : (m.thinkJa || (isJa(m.think) ? m.think : (sh.err ? '訳せなかったよ。閉じて、もう一度開いてね' : '日本語に訳しているところ…')));
+    body = `<div class="thinktext">${esc(text)}</div>`;
+  }
+  return `<div class="scrim" data-act="closeSheet"></div>
+    <div class="sheet ${cls}" id="sheet" role="dialog" aria-label="${title}"><div class="grab"></div>
+    <div class="shead"><button class="iconbtn" data-act="closeSheet" aria-label="閉じる">${ICON.x}</button><h2>${title}</h2><span style="width:44px"></span></div>
+    <div class="sbody">${body}</div></div>`;
+}
+// ===== サイドバー =====
+function drawerHtml(){
+  const recent = [...S.chats].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 10);
+  const cur = S.view.name === 'chat' ? (chat(S.view.id) || {}).personaId : (S.view.name === 'threads' ? S.view.id : null);
+  return `<div class="scrim" data-act="closeDrawer"></div>
+    <nav class="drawer" aria-label="メニュー"><div class="brand">La Brume Enchantée</div><div class="dbody">
+    <div class="dsec">みんな</div>
+    ${S.personas.map(p => `<button class="drow" data-act="openPersona" data-id="${p.id}"><span class="avatar s">${esc(initialOf(p))}</span><span class="grow">${esc(p.name)}</span></button>`).join('')}
+    <div class="dsec">最近のチャット</div>
+    ${recent.map(c => { const p = persona(c.personaId); return `<button class="drow" data-act="openChat" data-id="${c.id}"><span class="grow">${esc(p ? p.name : '')}　No.${c.no}　<span class="sub">${shortDate(c.start)}〜</span></span></button>`; }).join('') || '<div class="sub" style="padding:8px 12px">まだありません</div>'}
+    </div>
+    <div class="dfoot"><button class="iconbtn" data-act="settings" aria-label="設定">${ICON.gear}</button><span class="sub">今回 ${money(monthUsed())}</span>
+    ${cur ? `<button class="btn" data-act="newChat" data-id="${cur}" style="width:auto;min-height:44px;padding:0 16px">＋ 新しいチャット</button>` : ''}</div></nav>`;
+}
 function attHtml(att){
   if (!att || !att.length) return '';
   const imgs = att.filter(a => a.kind === 'image');
@@ -382,9 +472,9 @@ function chatView(cid){
   const msgs = S.msgs[cid] || [];
   const streaming = S.stream && S.stream.chatId === cid;
   const ed = S.ui.editIndex;
-  let h = `<div class="top slim"><button class="iconbtn" data-act="back" aria-label="戻る">${ICON.back}</button>
+  let h = `<div class="top slim"><button class="iconbtn" data-act="openDrawer" aria-label="メニュー">${ICON.menu}</button>
     <div class="title"><h1>${esc(p.name)}</h1><span class="mini">No.${c.no}</span></div>
-    <span class="mini ${isWarn() ? 'warn' : ''}">今月 ${money(monthUsed())}</span>
+    <span class="mini ${isWarn() ? 'warn' : ''}">今回 ${money(monthUsed())}</span>
     <button class="iconbtn" data-act="chatMenu" aria-label="メニュー" aria-expanded="${S.ui.menu ? 'true' : 'false'}">${ICON.more}</button></div>
     ${S.ui.menu ? `<div class="menu"><button data-act="deleteChat" data-id="${c.id}">このチャットを消す</button></div>` : ''}
     <div class="msgs" id="msgs">`;
@@ -400,9 +490,7 @@ function chatView(cid){
       }
     } else {
       if (S.settings.showThink && m.think){
-        const open = S.ui.openThink && S.ui.openThink[i];
-        h += `<button class="act thinkbtn" data-act="toggleThink" data-i="${i}" aria-expanded="${open ? 'true' : 'false'}">考えたこと ${open ? '▴' : '▾'}</button>`;
-        if (open) h += `<div class="thinkbox">${esc(m.thinkJa || (isJa(m.think) ? m.think : (S.ui.transErr && S.ui.transErr[i] ? '訳せなかったよ。もう一度開き直してね' : '日本語に訳しているところ…')))}</div>`;
+        h += `<button class="act thinkbtn" data-act="openThink" data-i="${i}">考えたこと ›</button>`;
       }
       h += `<div class="bubble ai${dim}">${fmt(m.text)}</div>`;
       if (m.notes) h += `<div class="note">${esc(m.notes.join('・'))}</div>`;
@@ -415,7 +503,7 @@ function chatView(cid){
   });
   if (streaming){
     // 「考えたこと」の場所を先に出しておく（終わってから割り込んでカクッとならないように）
-    if (S.settings.showThink && p.think !== false) h += `<button class="act thinkbtn" disabled>考えたこと ▾</button>`;
+    if (S.settings.showThink && p.think !== false) h += `<button class="act thinkbtn" disabled>考えたこと ›</button>`;
     h += `<div class="bubble ai" id="streamText">${streamShown() ? fmt(streamShown()) : '<span class="dots" aria-label="書いているところ"><i></i><i></i><i></i></span>'}</div>`;
   }
   if (c.cutOffer != null && msgs[c.cutOffer] && !streaming){
@@ -438,7 +526,7 @@ function chatView(cid){
     <textarea id="input" rows="1" placeholder="メッセージ"></textarea>
     <div class="crow">
       <button class="cbtn" data-act="attach" aria-label="写真やファイルを添える">${ICON.plus}</button>
-      <span class="mchip">${esc(modelLabel(p.model))}${ICON.down}<select data-change="chatModel" aria-label="モデルを切り替える">${opts}</select></span>
+      <button class="mchip" data-act="openModels" aria-label="モデルを選ぶ">${esc(modelLabel(p.model))}${ICON.down}</button>
       <span class="grow"></span>
       ${streaming
         ? `<button class="send" data-act="stop" aria-label="止める">${ICON.stop}</button>`
@@ -451,40 +539,48 @@ function chatView(cid){
 
 function settingsView(){
   const s = S.settings;
+  const sw = (key, name, sub, on) => `<label class="srow"><span class="stext"><span class="sname">${name}</span>${sub ? `<span class="ssub">${sub}</span>` : ''}</span><input type="checkbox" class="switch" ${on ? 'checked' : ''} data-change="${key}"></label>`;
   return `<div class="top"><button class="iconbtn" data-act="back" aria-label="戻る">${ICON.back}</button>
     <div class="title"><h1>設定</h1></div></div>
     <div class="scroll"><div class="pad">
-    <label class="f" for="apiKey">APIキー</label>
-    <div class="keyrow"><input class="t" id="apiKey" type="${S.ui.showKey ? 'text' : 'password'}" autocomplete="off" spellcheck="false" value="${esc(s.apiKey)}" data-change="apiKey" placeholder="sk-ant-…">
+
+    <div class="sec"><h2>APIキー</h2>
+    <div class="keyrow"><input class="t" id="apiKey" type="${S.ui.showKey ? 'text' : 'password'}" autocomplete="off" spellcheck="false" value="${esc(s.apiKey)}" data-change="apiKey" placeholder="sk-ant-…" aria-label="APIキー">
     <button class="btn ghost" data-act="toggleKey">${S.ui.showKey ? '隠す' : '見る'}</button></div>
-    <div class="hint">キーはこのスマホの中にだけ保存されます。バックアップには入りません。</div>
+    <div class="hint">このスマホの中にだけ保存。バックアップには入りません。</div></div>
 
-    <label class="f" for="userPrefs">アリサの個人設定（みんなに渡す） <span id="prefCount">${(s.userPrefs || '').length}文字</span></label>
-    <textarea class="t" id="userPrefs" data-change="userPrefs">${esc(s.userPrefs)}</textarea>
-    <div class="hint">Claudeのアプリの「プロフィール」に書いている個人設定を、そのまま貼ってください。どのお部屋でも毎回渡します。</div>
+    <div class="sec"><h2>アリサの個人設定 <span id="prefCount">${(s.userPrefs || '').length}文字</span></h2>
+    <textarea class="t" id="userPrefs" data-change="userPrefs" aria-label="アリサの個人設定">${esc(s.userPrefs)}</textarea>
+    <div class="hint">Claudeのアプリのプロフィールに書いているものを、そのまま。みんなに毎回渡します。</div></div>
 
-    <label class="toggle"><input type="checkbox" ${s.sendDate ? 'checked' : ''} data-change="sendDate">今日の日付をみんなに渡す（時間は渡さない）</label>
+    <div class="sec"><h2>みんなに渡すもの</h2>
+    ${sw('sendDate', '今日の日付', '時間は渡しません', s.sendDate)}</div>
 
-    <label class="toggle"><input type="checkbox" ${s.showThink ? 'checked' : ''} data-change="showThink">返事の上に「考えたこと」を出す（開いたときだけ日本語に訳すので、そのときだけ少しお金がかかります）</label>
+    <div class="sec"><h2>表示</h2>
+    ${sw('showThink', '考えたこと', '開いたときだけ日本語に訳します（そのときだけ少しお金がかかります）', s.showThink)}</div>
 
-    <label class="f" for="cutChars">会話を切る長さ（文字）</label>
+    <div class="sec"><h2>会話の長さ</h2>
+    <label class="f" for="cutChars" style="margin-top:0">切る長さ（文字）</label>
     <input class="t" id="cutChars" type="number" inputmode="numeric" min="10000" step="10000" value="${esc(s.cutChars)}" data-change="cutChars">
-    <div class="hint">ひとつのチャットの会話がこの長さを超えたら、古いほうの半分くらいを、場面の切れ目で送らないようにします。切る前にひと声かけます。画面からは消えず、みんなが探せば見つけられます。</div>
+    <div class="hint">超えたら、古いほうの半分くらいを場面の切れ目で送らないようにします。切る前にひと声かけます。</div></div>
 
-    <label class="f" for="cap">月の上限（ドル）</label>
-    <input class="t" id="cap" type="number" inputmode="decimal" min="1" value="${esc(s.monthlyCap)}" data-change="cap">
-    <div class="hint">上限の8割を超えると、金額の色が変わります。話すのは止めません。金額はアプリの見積もりです。</div>
+    <div class="sec"><h2>お金</h2>
+    <div class="pair"><div><label class="f" for="cap" style="margin-top:0">上限（ドル）</label>
+    <input class="t" id="cap" type="number" inputmode="decimal" min="1" value="${esc(s.monthlyCap)}" data-change="cap"></div>
+    <div><label class="f" for="cycleDay" style="margin-top:0">区切りの日</label>
+    <input class="t" id="cycleDay" type="number" inputmode="numeric" min="1" max="28" value="${esc(s.cycleDay)}" data-change="cycleDay"></div></div>
+    <div class="hint">8割を超えると色が変わります（止めはしません）。区切りの日は、クレジットの請求期間に合わせます（今は${periodLabel()}）。金額はアプリの見積もりです。</div></div>
 
-    <button class="btn" data-act="saveAll" style="margin-top:24px">保存する</button>
+    <button class="btn" data-act="saveAll" style="margin-top:28px">保存する</button>
 
-    <div class="section"><h2>バックアップ</h2>
-    <div class="hint">みんなの設定・カスタム指示・ナレッジ・会話を、まとめて1個のファイルにします。</div>
-    <div style="margin-top:12px"><button class="btn" data-act="backup">バックアップを保存</button>
+    <div class="sec"><h2>バックアップ</h2>
+    <button class="btn" data-act="backup">バックアップを保存</button>
     <button class="btn ghost" data-act="restore">バックアップから戻す</button>
-    <input type="file" id="restoreFile" accept=".json,application/json" data-change="restoreFile" hidden></div></div>
+    <input type="file" id="restoreFile" accept=".json,application/json" data-change="restoreFile" hidden>
+    <div class="hint">設定・カスタム指示・ナレッジ・メモリ・会話を、まとめて1個のファイルにします。</div></div>
 
-    <div class="section"><h2>お部屋</h2>
-    <div style="margin-top:12px"><button class="btn ghost" data-act="newPersona">お部屋を追加</button></div></div>
+    <div class="sec"><h2>お部屋</h2>
+    <button class="btn ghost" data-act="newPersona">お部屋を追加</button></div>
 
     <div class="hint" style="margin-top:32px">La Brume Enchantée　ver ${APP_VERSION}</div>
     </div></div>`;
@@ -555,6 +651,8 @@ function render(opts = {}){
   else if (v.name === 'settings') html = settingsView();
   else if (v.name === 'persona') html = personaView(v.id);
   else html = homeView();
+  if (S.ui.sheet && v.name === 'chat') html += sheetHtml();
+  if (S.ui.drawer) html += drawerHtml();
   app.innerHTML = html;
   const input = $('#input');
   if (input){
@@ -934,7 +1032,7 @@ function addCost(p, u){
   const c5m = cc ? (cc.ephemeral_5m_input_tokens || 0) : 0;
   const cost = (u.input_tokens || 0) * inP + c1h * inP * 2 + c5m * inP * 1.25
     + (u.cache_read_input_tokens || 0) * inP * readMult(p.model) + (u.output_tokens || 0) * outP;
-  const k = monthKey();
+  const k = periodKey();
   S.usage[k] = (S.usage[k] || 0) + cost;
   saveUsage();
 }
@@ -1106,16 +1204,21 @@ const actions = {
     await saveChats(); render({ keepScroll: true });
   },
   chatMenu(){ S.ui.menu = !S.ui.menu; render({ keepScroll: true }); },
-  async toggleThink(t){
+  openDrawer(){ S.ui.drawer = true; S.ui.menu = false; render({ keepScroll: true }); },
+  closeDrawer(){ S.ui.drawer = false; render({ keepScroll: true }); },
+  openModels(){ S.ui.sheet = { type: 'model' }; render({ keepScroll: true }); },
+  closeSheet(){ S.ui.sheet = null; render({ keepScroll: true }); },
+  customModel(){ S.ui.sheet.custom = true; render({ keepScroll: true }); const f = $('#customModel'); if (f) f.focus(); },
+  pickModel(t){ setModel(t.dataset.m); },
+  pickCustomModel(){ const v = ($('#customModel').value || '').trim(); if (!v){ toast('モデル名を入れてね'); return; } setModel(v); },
+  async openThink(t){
     const i = Number(t.dataset.i), cid = S.view.id;
-    S.ui.openThink = S.ui.openThink || {};
-    S.ui.openThink[i] = !S.ui.openThink[i];
+    S.ui.sheet = { type: 'think', i, full: false, err: false };
     render({ keepScroll: true });
     const m = S.msgs[cid][i];
-    if (S.ui.openThink[i] && !m.thinkJa && !isJa(m.think)){
-      S.ui.transErr = S.ui.transErr || {}; S.ui.transErr[i] = false;
-      try { await translateThink(cid, i); } catch(e){ S.ui.transErr[i] = true; }
-      if (S.view.name === 'chat' && S.view.id === cid) render({ keepScroll: true });
+    if (!m.thinkJa && !isJa(m.think)){
+      try { await translateThink(cid, i); } catch(e){ if (S.ui.sheet) S.ui.sheet.err = true; }
+      if (S.view.name === 'chat' && S.view.id === cid && S.ui.sheet && S.ui.sheet.type === 'think' && S.ui.sheet.i === i) render({ keepScroll: true });
     }
   },
   rmAtt(t){ (S.ui.att || []).splice(Number(t.dataset.i), 1); render({ keepScroll: true }); },
@@ -1132,6 +1235,7 @@ const actions = {
     S.settings.userPrefs = $('#userPrefs').value;
     const v = Number($('#cap').value); if (v > 0) S.settings.monthlyCap = v;
     const cv = Number($('#cutChars').value); if (cv >= 10000) S.settings.cutChars = cv;
+    const cd = Math.round(Number($('#cycleDay').value)); if (cd >= 1 && cd <= 28) S.settings.cycleDay = cd;
     await saveSettings();
     toast('保存したよ');
   },
@@ -1203,6 +1307,18 @@ async function removeChat(id){
   return true;
 }
 
+function setModel(v){
+  const c = chat(S.view.id), p = c && persona(c.personaId);
+  if (!p) return;
+  p.model = v;
+  const pr = priceFor(v);
+  if (pr){ p.priceIn = pr[0]; p.priceOut = pr[1]; }
+  savePersonas();
+  S.ui.sheet = null;
+  toast(`${modelLabel(v)}にしたよ`);
+  render({ keepScroll: true });
+}
+
 function collectPD(){
   const d = S.ui.pd;
   if (!d || !$('#pName')) return;
@@ -1221,6 +1337,7 @@ const changes = {
   sendDate(t){ S.settings.sendDate = t.checked; saveSettings(); },
   showThink(t){ S.settings.showThink = t.checked; saveSettings(); },
   userPrefs(t){ S.settings.userPrefs = t.value; saveSettings(); toast('個人設定を保存したよ'); },
+  cycleDay(t){ const v = Math.round(Number(t.value)); if (v >= 1 && v <= 28){ S.settings.cycleDay = v; saveSettings(); } },
   cutChars(t){ const v = Number(t.value); if (v >= 10000){ S.settings.cutChars = v; saveSettings(); } },
   cap(t){ const v = Number(t.value); if (v > 0){ S.settings.monthlyCap = v; saveSettings(); } },
   chatModel(t){
@@ -1315,6 +1432,22 @@ function toBase64(file){
 }
 
 /* ===== イベント ===== */
+// 下から出てくる画面：上の部分を引っぱり上げると全画面、引き下げると小さく／閉じる
+let sheetY = null;
+app.addEventListener('touchstart', e => {
+  if (e.target.closest && e.target.closest('.grab, .shead')) sheetY = e.touches[0].clientY; else sheetY = null;
+}, { passive: true });
+app.addEventListener('touchend', e => {
+  if (sheetY == null || !S.ui.sheet) return;
+  const dy = e.changedTouches[0].clientY - sheetY; sheetY = null;
+  const el = $('#sheet');
+  if (!el) return;
+  if (dy < -30 && S.ui.sheet.type === 'think'){ S.ui.sheet.full = true; el.classList.add('full'); }
+  else if (dy > 60){
+    if (S.ui.sheet.full){ S.ui.sheet.full = false; el.classList.remove('full'); }
+    else { S.ui.sheet = null; render({ keepScroll: true }); }
+  }
+});
 // 返事が終わったあとに入力欄を押したら、上に置いていたメッセージを解いて、いちばん新しいところを見せる
 app.addEventListener('focusin', e => {
   if (e.target.id === 'input' && !S.ui.cfocus){ S.ui.cfocus = true; updateCompact(); }
