@@ -228,20 +228,22 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.11';
+const APP_VERSION = '0.11.1';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
 
 // モデル名の候補と、1Mトークンあたりの料金（入力, 出力 / ドル）
 // 料金は目安。お部屋の設定画面でひとりずつ書き換えられる。
+// [モデル名, 入力, 出力, 表示名, キャッシュ読み込み]（1Mトークンあたりのドル。公式の料金表 2026.10.25）
+// キャッシュ書き込みは、どのモデルも5分＝入力×1.25、1時間＝入力×2
 const MODELS = [
-  ['claude-fable-5-1', 10, 50, 'Fable 5.1'],
-  ['claude-fable-5',   10, 50, 'Fable 5'],
-  ['claude-opus-5-5',   4, 20, 'Opus 5.5'],
-  ['claude-opus-5',     5, 25, 'Opus 5'],
-  ['claude-sonnet-5-5', 2, 10, 'Sonnet 5.5'],
-  ['claude-haiku-5-5',  1,  5, 'Haiku 5.5'],
+  ['claude-fable-5-1', 10, 50, 'Fable 5.1', 0.25],
+  ['claude-fable-5',   10, 50, 'Fable 5',   1],
+  ['claude-opus-5-5',   4, 20, 'Opus 5.5',  0.20],
+  ['claude-opus-5',     5, 25, 'Opus 5',    0.50],
+  ['claude-sonnet-5-5', 2, 10, 'Sonnet 5.5', 0.10],
+  ['claude-haiku-5-5', 0.1, 0.5, 'Haiku 5.5', 0.01], // 10万トークン以下の場合。超えると 0.5・2.5・0.05
 ];
 function priceFor(model){
   const m = MODELS.find(x => x[0] === model);
@@ -1082,7 +1084,7 @@ async function converse(p, msgs, signal, onText, cutAt){
 }
 
 // 考えたことの日本語訳（開いたときだけ、一番安いモデルで）
-const TRANSLATOR = { model: 'claude-haiku-5-5', priceIn: 1, priceOut: 5 };
+const TRANSLATOR = { model: 'claude-haiku-5-5', priceIn: 0.1, priceOut: 0.5 };
 const isJa = t => { const s = String(t || ''); const ja = (s.match(/[\u3040-\u30ff\u4e00-\u9fff]/g) || []).length; return ja > s.length * 0.2; };
 const THINK_TR_VER = 2;
 async function translateThink(cid, i){
@@ -1112,7 +1114,8 @@ ${m.think}`;
   await saveMsgs(cid);
 }
 
-function readMult(model){ return model === 'claude-opus-5-5' ? 0.05 : 0.1; }
+// キャッシュ読み込みは入力の何倍か（一覧にないモデルは0.1倍）
+function readMult(model){ const m = MODELS.find(x => x[0] === model); return m && m[1] ? m[4] / m[1] : 0.1; }
 function addCost(p, u){
   if (!u || (!u.input_tokens && !u.output_tokens && !u.cache_read_input_tokens && !u.cache_creation_input_tokens)) return;
   const inP = (Number(p.priceIn) || 10) / 1e6, outP = (Number(p.priceOut) || 50) / 1e6;
