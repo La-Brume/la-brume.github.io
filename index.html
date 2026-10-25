@@ -30,7 +30,7 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box}
-html,body{height:100%;margin:0;background:var(--bg);color:var(--text)}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--text);overscroll-behavior-y:none}
 body{font-family:'Noto Sans JP','Noto Sans CJK JP',sans-serif;font-size:16px;line-height:1.6;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
 #app{position:relative;height:100%;display:flex;flex-direction:column;max-width:640px;margin:0 auto;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 button{font:inherit;color:inherit;cursor:pointer}
@@ -153,6 +153,13 @@ textarea.t.small{min-height:120px}
 .keyrow{display:flex;gap:8px}
 .keyrow input{flex:1}
 .keyrow .btn{width:auto}
+.kgroup{font-size:12px;color:var(--muted);margin:14px 0 6px}
+.kcard{background:var(--surface);border-radius:12px;padding:8px 8px 10px 14px;margin-bottom:8px}
+.kcard .ktop{display:flex;align-items:center;gap:8px}
+.kcard .ktop .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kcard input.kdesc{width:100%;margin-top:6px;border:none;border-radius:10px;background:var(--bg);color:var(--text);padding:9px 12px;font:inherit;font-size:14px}
+.kcard.off{opacity:.85}
+.shelflog{font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.7}
 .kitem{display:flex;align-items:center;gap:8px;background:var(--surface);border-radius:12px;padding:6px 6px 6px 14px;margin-bottom:6px}
 .kitem .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .section{margin-top:28px;padding-top:8px;border-top:1px solid var(--line)}
@@ -161,13 +168,13 @@ textarea.t.small{min-height:120px}
 .toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--accent);color:var(--onaccent);padding:8px 16px;border-radius:999px;font-size:14px;z-index:10}
 .mchip{border:none;cursor:pointer}
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:20;animation:fadein .2s}
-.sheet{position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;background:#232220;border-radius:24px 24px 0 0;z-index:21;height:58vh;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px);animation:slideup .22s ease-out;transition:height .2s ease}
+.sheet{overscroll-behavior:contain;position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;background:#232220;border-radius:24px 24px 0 0;z-index:21;height:58vh;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px);animation:slideup .22s ease-out;transition:height .2s ease}
 .sheet.full{height:calc(100% - env(safe-area-inset-top,0px) - 12px)}
 .sheet.fit{height:auto;max-height:85vh}
 .grab{width:44px;height:5px;border-radius:3px;background:rgba(255,255,255,.22);margin:8px auto 0;flex-shrink:0}
 .shead{display:flex;align-items:center;padding:2px 6px;flex-shrink:0;touch-action:none}
 .shead h2{flex:1;text-align:center;font-size:16px;margin:0}
-.sbody{flex:1;overflow-y:auto;padding:6px 16px 20px;-webkit-overflow-scrolling:touch}
+.sbody{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:6px 16px 20px;-webkit-overflow-scrolling:touch}
 .mlist{background:var(--surface);border-radius:16px;overflow:hidden}
 .mrow{display:flex;align-items:center;width:100%;min-height:56px;padding:0 18px;border:none;background:none;color:var(--text);font-size:16px;text-align:left;border-bottom:1px solid rgba(255,255,255,.06)}
 .mrow:last-child{border-bottom:none}
@@ -210,7 +217,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.9.1';
+const APP_VERSION = '0.10';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -436,8 +443,8 @@ function sheetHtml(){
   } else if (sh.type === 'think'){
     title = '考えたこと'; cls = sh.full ? 'full' : '';
     const m = (S.msgs[c.id] || [])[sh.i];
-    const text = !m ? '' : (m.thinkJa || (isJa(m.think) ? m.think : (sh.err ? '訳せなかったよ。閉じて、もう一度開いてね' : '日本語に訳しているところ…')));
-    body = `<div class="thinktext">${esc(text)}</div>`;
+    const text = !m || !m.think ? '' : ((m.thinkJaV === THINK_TR_VER && m.thinkJa) || (isJa(m.think) ? m.think : (sh.err ? '訳せなかったよ。閉じて、もう一度開いてね' : '日本語に訳しているところ…')));
+    body = (m && m.shelf ? `<div class="shelflog">${m.shelf.map(esc).join('<br>')}</div>` : '') + `<div class="thinktext">${esc(text)}</div>`;
   }
   return `<div class="scrim" data-act="closeSheet"></div>
     <div class="sheet ${cls}" id="sheet" role="dialog" aria-label="${title}"><div class="grab"></div>
@@ -489,7 +496,7 @@ function chatView(cid){
           <button class="act icon" data-act="copy" data-i="${i}" aria-label="コピー">${ICON.copy}</button></div>`;
       }
     } else {
-      if (S.settings.showThink && m.think){
+      if (S.settings.showThink && (m.think || m.shelf)){
         h += `<button class="act thinkbtn" data-act="openThink" data-i="${i}">考えたこと ›</button>`;
       }
       h += `<div class="bubble ai${dim}">${fmt(m.text)}</div>`;
@@ -618,10 +625,17 @@ function personaView(id){
 
     <label class="f">ナレッジ</label>`;
   if (!d.knowledge.length) h += `<div class="sub" style="margin-bottom:8px">まだありません</div>`;
-  d.knowledge.forEach((k, i) => {
-    h += `<div class="kitem"><span class="grow">${esc(k.name)} <span class="sub">${k.text.length}文字</span></span>
-      <button class="act" data-act="delKnow" data-i="${i}">外す</button></div>`;
-  });
+  const kcard = (k, i) => `<div class="kcard${k.on === false ? ' off' : ''}"><div class="ktop">
+      <span class="grow">${esc(k.name)} <span class="sub">${k.text.length}文字</span></span>
+      <input type="checkbox" class="switch" ${k.on === false ? '' : 'checked'} data-change="kOn" data-i="${i}" aria-label="${esc(k.name)}を手元に置く">
+      <button class="act" data-act="delKnow" data-i="${i}">外す</button></div>
+      <input class="kdesc" id="kdesc-${i}" value="${esc(k.desc || '')}" placeholder="一行の説明（棚にあるとき、これだけ渡します）" aria-label="${esc(k.name)}の説明"></div>`;
+  const onK = d.knowledge.map((k, i) => [k, i]).filter(([k]) => k.on !== false);
+  const offK = d.knowledge.map((k, i) => [k, i]).filter(([k]) => k.on === false);
+  if (d.knowledge.length){
+    h += `<div class="kgroup">手元（毎回まるごと渡す）</div>` + (onK.length ? onK.map(([k, i]) => kcard(k, i)).join('') : `<div class="sub" style="margin-bottom:8px">なし</div>`);
+    h += `<div class="kgroup">棚（名前と説明だけ渡す。必要なときに${esc(d.name || 'そのひと')}が開く）</div>` + (offK.length ? offK.map(([k, i]) => kcard(k, i)).join('') : `<div class="sub" style="margin-bottom:8px">なし</div>`);
+  }
   if (S.ui.pasteOpen){
     h += `<div class="card" style="margin-top:8px"><label class="f" for="kName">名前</label><input class="t" id="kName" placeholder="たとえば 設定メモ">
       <label class="f" for="kText">中身</label><textarea class="t small" id="kText"></textarea>
@@ -776,12 +790,39 @@ const TOOLS = [
   { name: 'search_past',
     description: '自分のお部屋の過去の会話から、言葉で探す。アリサに「前に話したあれ」と言われたときや、覚えていない昔の話が出てきたときに使う。見つかったところの前後が少しだけ返ってくる。',
     input_schema: { type: 'object', properties: { query: { type: 'string', description: '探す言葉。いくつか並べるときは空白で区切る' } }, required: ['query'] } },
+  { name: 'shelf_read',
+    description: '棚にあるナレッジのファイルを、名前を指定して開いて中身を読む。必要だと思ったら自分の判断で使っていい。アリサに「〇〇見てきて」と言われたら必ず使う。',
+    input_schema: { type: 'object', properties: { name: { type: 'string', description: '棚のファイルの名前（目録に書いてある名前）' } }, required: ['name'] } },
+  { name: 'shelf_search',
+    description: '棚にあるナレッジのファイルの中を言葉で探して、当てはまるところを返す。どのファイルにあるかわからないときに使う。',
+    input_schema: { type: 'object', properties: { query: { type: 'string', description: '探す言葉。いくつか並べるときは空白で区切る' } }, required: ['query'] } },
   { name: 'memory_rewrite',
     description: '自分のメモリ全体を整理して書き直す。アリサに「整理しといて」などと頼まれたときだけ使う。大事なことを落とさないこと。' + MEMORY_RULES,
     input_schema: { type: 'object', properties: { content: { type: 'string', description: '整理したあとのメモリ全体' } }, required: ['content'] } },
 ];
 async function runTool(p, name, input){
   input = input || {};
+  const shelf = (p.knowledge || []).filter(k => k.on === false);
+  if (name === 'shelf_read'){
+    const n = String(input.name || '').trim();
+    const k = shelf.find(x => x.name === n) || shelf.find(x => n && (x.name.includes(n) || n.includes(x.name)));
+    if (!k) return { msg: `棚に「${n}」は見つかりませんでした。棚にあるのは：${shelf.map(x => x.name).join('、') || 'なし'}`, note: null, log: null };
+    const MAX = 50000;
+    return { msg: `【${k.name}】\n${k.text.length > MAX ? k.text.slice(0, MAX) + '\n（長いので、ここまで）' : k.text}`, note: null, log: `棚の「${k.name}」を開いた` };
+  }
+  if (name === 'shelf_search'){
+    const q = String(input.query || '').trim();
+    if (!q) return { msg: '探す言葉が空でした。', note: null, log: null };
+    const terms = q.split(/[\s\u3000、,]+/).filter(Boolean).map(t => t.toLowerCase());
+    const hits = [];
+    shelf.forEach(k => {
+      const low = k.text.toLowerCase();
+      terms.forEach(w => { let at = low.indexOf(w), n = 0; while (at >= 0 && n < 3){ hits.push({ k, at }); at = low.indexOf(w, at + w.length); n++; } });
+    });
+    if (!hits.length) return { msg: `棚の中に「${q}」は見つかりませんでした。`, note: null, log: `棚で「${q}」を探した` };
+    const out = hits.slice(0, 6).map(h => { const st = Math.max(0, h.at - 200); return `【${h.k.name}】${st > 0 ? '…' : ''}${h.k.text.slice(st, st + 450)}${st + 450 < h.k.text.length ? '…' : ''}`; }).join('\n\n');
+    return { msg: out, note: null, log: `棚で「${q}」を探した` };
+  }
   if (name === 'search_past'){
     const q = String(input.query || '').trim();
     if (!q) return { msg: '探す言葉が空でした。', note: null };
@@ -857,8 +898,11 @@ function buildBody(p, apiMsgs, o){
   const prefs = (S.settings.userPrefs || '').trim();
   if (prefs) system.push({ type: 'text', text: `【アリサが自分で書いた個人設定】\n${prefs}` });
   if ((p.instructions || '').trim()) system.push({ type: 'text', text: p.instructions });
-  const kn = (p.knowledge || []).filter(k => k.text.trim()).map(k => `【${k.name}】\n${k.text}`).join('\n\n');
+  // 手元のナレッジは毎回まるごと。棚のナレッジは目録（名前と一行の説明）だけ。どちらも固定の部分に置く
+  const kn = (p.knowledge || []).filter(k => k.on !== false && k.text.trim()).map(k => `【${k.name}】\n${k.text}`).join('\n\n');
   if (kn) system.push({ type: 'text', text: kn });
+  const shelf = (p.knowledge || []).filter(k => k.on === false && k.text.trim());
+  if (shelf.length) system.push({ type: 'text', text: `【棚にあるもの】\n中身は渡していない。必要だと思ったら、自分の判断で shelf_read で開いたり、shelf_search で探したりしていい。アリサに「〇〇見てきて」と言われたら、必ず開く。\n${shelf.map(k => `・${k.name}${k.desc ? '：' + k.desc : ''}`).join('\n')}` });
   // メモリの手前にもキャッシュの印。メモリが書きかわっても、ここまでは読み直しで済む
   if (system.length) system[system.length - 1].cache_control = cc;
   const mem = (p.memory || '').trim();
@@ -976,7 +1020,7 @@ async function converse(p, msgs, signal, onText, cutAt){
   if (cutAt && apiMsgs.length) apiMsgs[0].content.unshift({ type: 'text', text: '（ここより前の会話は、長くなったので省いてある。必要なら search_past で探せる）' });
   const o = { ttl: true, think: p.think !== false, display: true };
   let shown = '', thoughts = '';
-  const notes = [];
+  const notes = [], logs = [];
   for (let round = 0; round < 4; round++){
     const sep = shown.trim() ? '\n\n' : '';
     const usage = {};
@@ -992,34 +1036,49 @@ async function converse(p, msgs, signal, onText, cutAt){
     if (r.text.trim()) shown += sep + r.text;
     const th = r.blocks.filter(b => b.type === 'thinking' && b.thinking).map(b => b.thinking).join('\n\n');
     if (th) thoughts += (thoughts ? '\n\n' : '') + th;
-    if (r.stop !== 'tool_use') return { text: shown, stop: r.stop, notes, thoughts };
+    if (r.stop !== 'tool_use') return { text: shown, stop: r.stop, notes, thoughts, logs };
     const results = [];
     for (const b of r.blocks.filter(b => b.type === 'tool_use')){
       const res = await runTool(p, b.name, b.input);
       if (res.note && !notes.includes(res.note)) notes.push(res.note);
+      if (res.log && !logs.includes(res.log)) logs.push(res.log);
       results.push({ type: 'tool_result', tool_use_id: b.id, content: res.msg });
     }
     await savePersonas();
     apiMsgs.push({ role: 'assistant', content: r.blocks });
     apiMsgs.push({ role: 'user', content: results });
   }
-  return { text: shown, stop: 'end_turn', notes, thoughts };
+  return { text: shown, stop: 'end_turn', notes, thoughts, logs };
 }
 
 // 考えたことの日本語訳（開いたときだけ、一番安いモデルで）
 const TRANSLATOR = { model: 'claude-haiku-5-5', priceIn: 1, priceOut: 5 };
 const isJa = t => { const s = String(t || ''); const ja = (s.match(/[\u3040-\u30ff\u4e00-\u9fff]/g) || []).length; return ja > s.length * 0.2; };
+const THINK_TR_VER = 2;
 async function translateThink(cid, i){
   const m = S.msgs[cid][i];
+  const c = chat(cid), pp = c && persona(c.personaId), who = pp ? pp.name : 'お部屋のひと';
+  const prompt = `次の文章は、${who}（お部屋のひと）が、アリサに返事をする前に考えたことです。自然な日本語に訳してください。
+
+決まり：
+・名前は必ずこの表記にする：Arisa / Alisa → アリサ、Suzu → スズ、Mikage → ミカゲ、Sango → 珊瑚
+・スズ、ミカゲ、珊瑚は男性。アリサは女性
+・名前を漢字に置き換えたり、意味で訳したりしない
+・${who}自身の考えなので、${who}の目線のまま訳す（${who}を他人のように書かない）
+・訳した文章だけを書く
+
+---
+${m.think}`;
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': S.settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-    body: JSON.stringify({ model: TRANSLATOR.model, max_tokens: 4000, messages: [{ role: 'user', content: '次の文章を、自然な日本語に訳してください。訳した文章だけを書いてください。\n\n' + m.think }] }),
+    body: JSON.stringify({ model: TRANSLATOR.model, max_tokens: 4000, messages: [{ role: 'user', content: prompt }] }),
   });
   const j = await res.json();
   if (!res.ok) throw mkErr('訳せなかったよ', (j.error && j.error.message) || res.status);
   addCost(TRANSLATOR, j.usage);
   m.thinkJa = (j.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+  m.thinkJaV = THINK_TR_VER;
   await saveMsgs(cid);
 }
 
@@ -1100,6 +1159,7 @@ async function runAssistant(cid){
       if (r.stop === 'max_tokens') m.stopped = true;
       if (r.notes.length) m.notes = r.notes;
       if (r.thoughts) m.think = r.thoughts;
+      if (r.logs && r.logs.length) m.shelf = r.logs;
       msgs.push(m);
     } else {
       if (r.notes.length) toast(r.notes.join('・'));
@@ -1216,7 +1276,7 @@ const actions = {
     S.ui.sheet = { type: 'think', i, full: false, err: false };
     render({ keepScroll: true });
     const m = S.msgs[cid][i];
-    if (!m.thinkJa && !isJa(m.think)){
+    if (m.think && (!m.thinkJa || m.thinkJaV !== THINK_TR_VER) && !isJa(m.think)){
       try { await translateThink(cid, i); } catch(e){ if (S.ui.sheet) S.ui.sheet.err = true; }
       if (S.view.name === 'chat' && S.view.id === cid && S.ui.sheet && S.ui.sheet.type === 'think' && S.ui.sheet.i === i) render({ keepScroll: true });
     }
@@ -1330,6 +1390,7 @@ function collectPD(){
   d.instructions = $('#pInst').value;
   d.think = $('#pThink').checked;
   d.memory = $('#pMem').value;
+  (d.knowledge || []).forEach((k, i) => { const el = $('#kdesc-' + i); if (el) k.desc = el.value.trim(); });
 }
 
 const changes = {
@@ -1377,6 +1438,7 @@ const changes = {
     if (pr){ $('#pIn').value = pr[0]; $('#pOut').value = pr[1]; }
     collectPD();
   },
+  kOn(t){ collectPD(); const k = S.ui.pd.knowledge[Number(t.dataset.i)]; if (k){ k.on = t.checked; } render(); },
   async knowFile(t){
     collectPD();
     for (const f of t.files){
@@ -1442,6 +1504,10 @@ app.addEventListener('touchstart', e => {
     sheetTop = !b || b.scrollTop <= 0 || !!e.target.closest('.grab, .shead');
   } else sheetY = null;
 }, { passive: true });
+app.addEventListener('touchmove', e => {
+  if (sheetY == null || !S.ui.sheet) return;
+  if (e.touches[0].clientY - sheetY > 0 && sheetTop && e.cancelable) e.preventDefault(); // 下に引いたときにページの再読み込みが始まらないように
+}, { passive: false });
 app.addEventListener('touchend', e => {
   if (sheetY == null || !S.ui.sheet) return;
   const dy = e.changedTouches[0].clientY - sheetY; sheetY = null;
