@@ -154,10 +154,15 @@ textarea.t.small{min-height:120px}
 .keyrow input{flex:1}
 .keyrow .btn{width:auto}
 .kgroup{font-size:12px;color:var(--muted);margin:14px 0 6px}
-.kcard{background:var(--surface);border-radius:12px;padding:8px 8px 10px 14px;margin-bottom:8px}
-.kcard .ktop{display:flex;align-items:center;gap:8px}
-.kcard .ktop .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.kcard input.kdesc{width:100%;margin-top:6px;border:none;border-radius:10px;background:var(--bg);color:var(--text);padding:9px 12px;font:inherit;font-size:14px}
+.kcard{background:var(--surface);border-radius:12px;padding:4px 6px 4px 4px;margin-bottom:6px}
+.kcard .ktop{display:flex;align-items:center;gap:6px}
+.kexp{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-height:48px;justify-content:center;padding:4px 10px;border:none;background:none;color:var(--text);text-align:left;border-radius:10px}
+.kexp:active{background:var(--surface2)}
+.kexp .kn{max-width:100%;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kexp .kd{max-width:100%;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kmore{display:flex;align-items:center;gap:6px;padding:2px 4px 6px 10px}
+.kmore input.kdesc{flex:1;margin-top:0}
+.kcard input.kdesc{width:100%;margin-top:4px;border:none;border-radius:10px;background:var(--bg);color:var(--text);padding:9px 12px;font:inherit;font-size:14px}
 .kcard.off{opacity:.85}
 .shelflog{font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.7}
 .kitem{display:flex;align-items:center;gap:8px;background:var(--surface);border-radius:12px;padding:6px 6px 6px 14px;margin-bottom:6px}
@@ -217,7 +222,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.10';
+const APP_VERSION = '0.10.1';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -625,11 +630,14 @@ function personaView(id){
 
     <label class="f">ナレッジ</label>`;
   if (!d.knowledge.length) h += `<div class="sub" style="margin-bottom:8px">まだありません</div>`;
+  // ふだんは一行だけ。押すと説明の欄と「外す」が出る
   const kcard = (k, i) => `<div class="kcard${k.on === false ? ' off' : ''}"><div class="ktop">
-      <span class="grow">${esc(k.name)} <span class="sub">${k.text.length}文字</span></span>
-      <input type="checkbox" class="switch" ${k.on === false ? '' : 'checked'} data-change="kOn" data-i="${i}" aria-label="${esc(k.name)}を手元に置く">
-      <button class="act" data-act="delKnow" data-i="${i}">外す</button></div>
-      <input class="kdesc" id="kdesc-${i}" value="${esc(k.desc || '')}" placeholder="一行の説明（棚にあるとき、これだけ渡します）" aria-label="${esc(k.name)}の説明"></div>`;
+      <button class="kexp" data-act="kExpand" data-i="${i}" aria-expanded="${S.ui.kOpen === i ? 'true' : 'false'}">
+        <span class="kn">${esc(k.name)} <span class="sub">${k.text.length}文字</span></span>
+        <span class="kd">${k.desc ? esc(k.desc) : '説明なし'}</span></button>
+      <input type="checkbox" class="switch" ${k.on === false ? '' : 'checked'} data-change="kOn" data-i="${i}" aria-label="${esc(k.name)}を手元に置く"></div>
+      ${S.ui.kOpen === i ? `<div class="kmore"><input class="kdesc" id="kdesc-${i}" value="${esc(k.desc || '')}" placeholder="一行の説明（棚にあるとき、これだけ渡す）" aria-label="${esc(k.name)}の説明">
+      <button class="act" data-act="delKnow" data-i="${i}">外す</button></div>` : ''}</div>`;
   const onK = d.knowledge.map((k, i) => [k, i]).filter(([k]) => k.on !== false);
   const offK = d.knowledge.map((k, i) => [k, i]).filter(([k]) => k.on === false);
   if (d.knowledge.length){
@@ -656,6 +664,10 @@ function personaView(id){
 /* ===== 描画 ===== */
 function render(opts = {}){
   const v = S.view;
+  // 同じ画面を描き直すときは、ページのスクロール位置をそのまま（スイッチを押して上に飛ばないように）
+  const pageKey = v.name + ':' + (v.id || '');
+  const oldPage = document.querySelector('.scroll');
+  const pageTop = (S._pageKey === pageKey && oldPage) ? oldPage.scrollTop : 0;
   const old = $('#msgs');
   const keepTop = opts.keepScroll && old ? old.scrollTop : null;
   const hadFocus = document.activeElement && document.activeElement.id === 'input';
@@ -668,6 +680,9 @@ function render(opts = {}){
   if (S.ui.sheet && v.name === 'chat') html += sheetHtml();
   if (S.ui.drawer) html += drawerHtml();
   app.innerHTML = html;
+  S._pageKey = pageKey;
+  const newPage = document.querySelector('.scroll');
+  if (newPage && pageTop) newPage.scrollTop = pageTop;
   const input = $('#input');
   if (input){
     input.value = S.ui.draft || '';
@@ -1309,7 +1324,8 @@ const actions = {
     if (text.trim()) S.ui.pd.knowledge.push({ name, text });
     S.ui.pasteOpen = false; render();
   },
-  delKnow(t){ collectPD(); S.ui.pd.knowledge.splice(Number(t.dataset.i), 1); render(); },
+  kExpand(t){ collectPD(); const i = Number(t.dataset.i); S.ui.kOpen = S.ui.kOpen === i ? null : i; render(); },
+  delKnow(t){ collectPD(); S.ui.pd.knowledge.splice(Number(t.dataset.i), 1); S.ui.kOpen = null; render(); },
   async savePersona(){
     collectPD();
     const d = S.ui.pd;
