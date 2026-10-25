@@ -1,8 +1,14 @@
 // La Brume Enchantée の service worker
-// アプリとしてインストールできるようにするためだけのもの。何も保存しない（いつも最新のファイルを読む）。
+// アプリとしてインストールできるようにするためのもの。何も保存しない。
+// 本体（ページ）は、開くたびに必ず最新を取りに行く（置き直したらすぐ変わるように）。
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET' || new URL(e.request.url).origin !== self.location.origin) return;
-  e.respondWith(fetch(e.request));
+  const r = e.request;
+  if (r.method !== 'GET' || new URL(r.url).origin !== self.location.origin) return;
+  if (r.mode === 'navigate'){
+    e.respondWith(fetch(r.url, { cache: 'no-store', credentials: 'same-origin' }).catch(() => fetch(r)));
+    return;
+  }
+  e.respondWith(fetch(r));
 });
