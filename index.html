@@ -222,7 +222,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.10.1';
+const APP_VERSION = '0.10.2';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -929,8 +929,11 @@ function buildBody(p, apiMsgs, o){
 
   // 会話の最後にだけキャッシュの印（次の返事でそこまでを読み直せる）
   const messages = apiMsgs.map(m => ({ role: m.role, content: m.content.map(b => { const c = Object.assign({}, b); delete c.cache_control; return c; }) }));
+  // キャッシュの印は、アリサが送った最後のメッセージに付ける。
+  // 道具（棚を開く・探すなど）のやりとりはその返事のあいだだけ使うものなので、キャッシュに書き込まない（書き込み代がムダになるため）
   if (messages.length){
-    const lastC = messages[messages.length - 1].content;
+    const ci = (o.cacheIdx != null && o.cacheIdx < messages.length) ? o.cacheIdx : messages.length - 1;
+    const lastC = messages[ci].content;
     lastC[lastC.length - 1].cache_control = cc;
   }
   const body = { model: p.model, max_tokens: MAX_TOKENS, stream: true, system, messages, tools: TOOLS };
@@ -1033,7 +1036,7 @@ async function callClaude(p, apiMsgs, signal, onText, usage, o){
 async function converse(p, msgs, signal, onText, cutAt){
   const apiMsgs = toApiMessages(cutAt ? msgs.slice(cutAt) : msgs);
   if (cutAt && apiMsgs.length) apiMsgs[0].content.unshift({ type: 'text', text: '（ここより前の会話は、長くなったので省いてある。必要なら search_past で探せる）' });
-  const o = { ttl: true, think: p.think !== false, display: true };
+  const o = { ttl: true, think: p.think !== false, display: true, cacheIdx: apiMsgs.length - 1 };
   let shown = '', thoughts = '';
   const notes = [], logs = [];
   for (let round = 0; round < 4; round++){
