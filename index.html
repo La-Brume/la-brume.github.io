@@ -38,7 +38,12 @@ button{font:inherit;color:inherit;cursor:pointer}
 
 .top{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);flex-shrink:0;min-height:60px}
 .top.slim{min-height:48px;padding:2px 6px;border-bottom:none}
-.top.slim .title{display:flex;align-items:baseline;gap:8px}
+.top.slim .title{display:flex;flex-direction:column;justify-content:center;gap:1px}
+.top.slim .tline{display:flex;align-items:baseline;gap:8px}
+.cstat{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);white-space:nowrap}
+.cbar{width:36px;height:3px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden;flex-shrink:0}
+.cbar>i{display:block;height:100%;background:var(--muted)}
+.cbar.near>i{background:var(--warn)}
 .top.slim h1{font-size:16px}
 .mini{font-size:12px;color:var(--muted);white-space:nowrap}
 .mini.warn{color:var(--warn)}
@@ -228,7 +233,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.12';
+const APP_VERSION = '0.12.1';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -482,6 +487,15 @@ function drawerHtml(){
     <div class="dfoot"><button class="iconbtn" data-act="settings" aria-label="設定">${ICON.gear}</button><span class="sub">今回 ${money(monthUsed())}</span>
     ${cur ? `<button class="btn" data-act="newChat" data-id="${cur}" style="width:auto;min-height:44px;padding:0 16px">＋ 新しいチャット</button>` : ''}</div></nav>`;
 }
+// 見出しの下の小さな表示：何往復目か（チャット全体の通し番号）と、送っている会話の量（切り落としたあとは残った分から）
+const man = n => (n / 10000).toFixed(1).replace(/\.0$/, '') + '万';
+function chatStat(c, msgs){
+  const turns = msgs.filter(m => m.role === 'user').length;
+  const lim = Number(S.settings.cutChars) || 60000;
+  const used = chatChars(msgs, c.cutAt || 0);
+  const pct = Math.min(100, used / lim * 100);
+  return `<span class="cstat"><span>${turns}往復</span><span>${man(used)}／${man(lim)}字</span><span class="cbar${pct >= 80 ? ' near' : ''}" aria-hidden="true"><i style="width:${pct}%"></i></span></span>`;
+}
 function attHtml(att){
   if (!att || !att.length) return '';
   const imgs = att.filter(a => a.kind === 'image');
@@ -497,7 +511,7 @@ function chatView(cid){
   const streaming = S.stream && S.stream.chatId === cid;
   const ed = S.ui.editIndex;
   let h = `<div class="top slim"><button class="iconbtn" data-act="openDrawer" aria-label="メニュー">${ICON.menu}</button>
-    <div class="title"><h1>${esc(p.name)}</h1><span class="mini">No.${c.no}</span></div>
+    <div class="title"><div class="tline"><h1>${esc(p.name)}</h1><span class="mini">No.${c.no}</span></div>${chatStat(c, msgs)}</div>
     <span class="mini ${isWarn() ? 'warn' : ''}">今回 ${money(monthUsed())}</span>
     <button class="iconbtn" data-act="chatMenu" aria-label="メニュー" aria-expanded="${S.ui.menu ? 'true' : 'false'}">${ICON.more}</button></div>
     ${S.ui.menu ? `<div class="menu"><button data-act="deleteChat" data-id="${c.id}">このチャットを消す</button></div>` : ''}
