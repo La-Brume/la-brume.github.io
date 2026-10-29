@@ -228,7 +228,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.11.1';
+const APP_VERSION = '0.12';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -242,6 +242,9 @@ const MODELS = [
   ['claude-fable-5',   10, 50, 'Fable 5',   1],
   ['claude-opus-5-5',   4, 20, 'Opus 5.5',  0.20],
   ['claude-opus-5',     5, 25, 'Opus 5',    0.50],
+  ['claude-opus-4-8',   5, 25, 'Opus 4.8',  0.50],
+  ['claude-opus-4-7',   5, 25, 'Opus 4.7',  0.50],
+  ['claude-opus-4-6',   5, 25, 'Opus 4.6',  0.50],
   ['claude-sonnet-5-5', 2, 10, 'Sonnet 5.5', 0.10],
   ['claude-haiku-5-5', 0.1, 0.5, 'Haiku 5.5', 0.01], // 10万トークン以下の場合。超えると 0.5・2.5・0.05
 ];
@@ -358,7 +361,7 @@ function newPersona(name, initial, model){
 
 async function load(){
   await DB.open();
-  S.settings = Object.assign({ apiKey: '', sendDate: true, monthlyCap: 100, userPrefs: '', showThink: false, cutChars: 60000, cycleDay: 22 }, (await DB.get('settings')) || {});
+  S.settings = Object.assign({ apiKey: '', sendDate: true, monthlyCap: 100, userPrefs: '', showThink: false, cutChars: 60000, cycleDay: 22, memChars: 4000 }, (await DB.get('settings')) || {});
   S.personas = (await DB.get('personas')) || [];
   S.chats = (await DB.get('chats')) || [];
   S.usage = (await DB.get('usage')) || {};
@@ -514,7 +517,10 @@ function chatView(cid){
         h += `<button class="act thinkbtn" data-act="openThink" data-i="${i}">考えたこと ›</button>`;
       }
       h += `<div class="bubble ai${dim}">${fmt(m.text)}</div>`;
-      if (m.notes) h += `<div class="note">${esc(m.notes.join('・'))}</div>`;
+      if (m.notes){
+        if (m.memOps && !m.memUndone) h += `<div class="note">${esc(m.notes.join('・'))}<button class="act" data-act="undoMem" data-i="${i}" style="min-height:32px;margin-left:6px">取り消す</button></div>`;
+        else h += `<div class="note">${m.memUndone ? 'メモリを元に戻したよ' : esc(m.notes.join('・'))}</div>`;
+      }
       if (m.stopped) h += `<div class="note">途中で止めたよ</div>`;
       if (i === msgs.length - 1 && !streaming && ed == null){
         h += `<div class="acts l"><button class="act icon" data-act="copy" data-i="${i}" aria-label="コピー">${ICON.copy}</button>
@@ -531,6 +537,12 @@ function chatView(cid){
     h += `<div class="cutbox">会話が長くなってきたよ。${shortDate(ymd(new Date(msgs[c.cutOffer].ts)))}のこのあたりより前を、そろそろ送らないようにするね。残したいことがあったら、先に「覚えといて」って頼んでから切ってね。画面からは消えないし、探せば見つかるよ。
       <div class="btns"><button class="btn" data-act="cutNow">切る</button><button class="btn ghost" data-act="cutLater">あとで</button></div></div>`;
   }
+  const memLim = Number(S.settings.memChars) || 4000, memLen = (p.memory || '').length;
+  if (!streaming && !S.ui.organizing && memLen > memLim && (!p.memSnooze || memLen > p.memSnooze)){
+    h += `<div class="cutbox">${esc(p.name)}のメモリが長くなってきたよ（${memLen}字）。整理してもらう？整理する前の版はとっておくから、お部屋の設定から戻せるよ。
+      <div class="btns"><button class="btn" data-act="organizeMem">整理してもらう</button><button class="btn ghost" data-act="organizeLater">あとで</button></div></div>`;
+  }
+  if (S.ui.organizing) h += `<div class="cutbox">${esc(p.name)}がメモリを整理しているところ…</div>`;
   const err = S.ui.error;
   if (err && err.chatId === cid && !streaming){
     h += `<div class="err" role="alert">${esc(err.message)}${err.detail ? `<div class="detail">${esc(err.detail)}</div>` : ''}
@@ -579,6 +591,11 @@ function settingsView(){
 
     <div class="sec"><h2>表示</h2>
     ${sw('showThink', '考えたこと', '開いたときだけ日本語に訳します（そのときだけ少しお金がかかります）', s.showThink)}</div>
+
+    <div class="sec"><h2>メモリ</h2>
+    <label class="f" for="memChars" style="margin-top:0">整理を声かけする長さ（文字）</label>
+    <input class="t" id="memChars" type="number" inputmode="numeric" min="1000" step="500" value="${esc(s.memChars)}" data-change="memChars">
+    <div class="hint">みんなのメモリがこの長さを超えたら、チャットで「整理してもらう？」と声をかけます。</div></div>
 
     <div class="sec"><h2>会話の長さ</h2>
     <label class="f" for="cutChars" style="margin-top:0">切る長さ（文字）</label>
@@ -668,7 +685,8 @@ function personaView(id){
   }
   h += `<label class="f" for="pMem">メモリ <span id="memCount">${(d.memory || '').length}文字</span></label>
     <textarea class="t" id="pMem">${esc(d.memory || '')}</textarea>
-    <div class="hint">${esc(d.name || 'このひと')}が「覚えといて」「整理しといて」と頼まれたときに書きます。アリサが直接貼ったり直したりもできます。</div>`;
+    <div class="hint">${esc(d.name || 'このひと')}が、約束や変化など大事なことを自分の判断で書きます。「覚えといて」と言えば必ず書きます。アリサが直接貼ったり直したりもできます。</div>
+    ${d.memoryPrev ? `<button class="btn ghost" data-act="restoreMem" style="margin-top:10px">ひとつ前の版に戻す（整理する前）</button>` : ''}`;
   h += `<div class="section"><button class="btn" data-act="savePersona">保存する</button>`;
   if (!isNew) h += `<button class="btn danger" data-act="deletePersona" style="margin-top:28px">このお部屋を消す</button>`;
   h += `</div></div></div>`;
@@ -811,10 +829,10 @@ function toast(msg){
 const MEMORY_RULES = 'メモリの書き方：言葉は自分の声で書く（事務的にそろえない）。出来事は全部は残さない。ただし約束など、この先に関わる大事な出来事は残す。変化は必ず残し、「こうしてね→わかった」で終わらせず、何がどう変わったかまで書く。古くなったことは書き足さずに書き換える。その場限りのことや推測は入れない。';
 const TOOLS = [
   { name: 'memory_add',
-    description: '自分のメモリの最後に書き足す。アリサに「覚えといて」などと頼まれたときだけ使う。自分の判断では使わない。すでに書いてあることの更新なら memory_replace を使う。' + MEMORY_RULES,
+    description: '自分のメモリの最後に書き足す。自分の判断で使っていい。ただし書くのは、約束と変化、この先に関わる大事なことだけ。その場の話題や、好みの小さなこと、推測は書かない。アリサに「覚えといて」と言われたら必ず書く。すでに書いてあることの更新なら memory_replace を使う。' + MEMORY_RULES,
     input_schema: { type: 'object', properties: { text: { type: 'string', description: '書き足す内容' } }, required: ['text'] } },
   { name: 'memory_replace',
-    description: '自分のメモリの一部を書きかえる。進展や変化があったときに、古い文を新しい文に置きかえる。アリサに頼まれたときだけ使う。' + MEMORY_RULES,
+    description: '自分のメモリの一部を書きかえる。進展や変化があったときに、古い文を新しい文に置きかえる。自分の判断で使っていい（書いていいのは memory_add と同じく、約束と変化と大事なことだけ）。' + MEMORY_RULES,
     input_schema: { type: 'object', properties: { old_text: { type: 'string', description: 'メモリにある、書きかえたい文（そのまま写す）' }, new_text: { type: 'string', description: '新しい文' } }, required: ['old_text', 'new_text'] } },
   { name: 'search_past',
     description: '自分のお部屋の過去の会話から、言葉で探す。アリサに「前に話したあれ」と言われたときや、覚えていない昔の話が出てきたときに使う。見つかったところの前後が少しだけ返ってくる。',
@@ -826,7 +844,7 @@ const TOOLS = [
     description: '棚にあるナレッジのファイルの中を言葉で探して、当てはまるところを返す。どのファイルにあるかわからないときに使う。',
     input_schema: { type: 'object', properties: { query: { type: 'string', description: '探す言葉。いくつか並べるときは空白で区切る' } }, required: ['query'] } },
   { name: 'memory_rewrite',
-    description: '自分のメモリ全体を整理して書き直す。アリサに「整理しといて」などと頼まれたときだけ使う。大事なことを落とさないこと。' + MEMORY_RULES,
+    description: '自分のメモリ全体を整理して書き直す。アリサに「整理しといて」と頼まれたとき、またはアプリから整理を頼まれたときだけ使う。大事なこと（約束・変化）を落とさないこと。重なりをまとめ、古くなったことを書き換える。' + MEMORY_RULES,
     input_schema: { type: 'object', properties: { content: { type: 'string', description: '整理したあとのメモリ全体' } }, required: ['content'] } },
 ];
 async function runTool(p, name, input){
@@ -878,19 +896,20 @@ async function runTool(p, name, input){
     const t = String(input.text || '').trim();
     if (!t) return { msg: '書き足す内容が空でした。', note: null };
     p.memory = (mem.trim() ? mem.replace(/\s+$/, '') + '\n' : '') + t;
-    return { msg: 'メモリに書き足しました。', note: 'メモリに書いたよ' };
+    return { msg: 'メモリに書き足しました。', note: 'メモリに書いたよ', op: { type: 'add', text: t } };
   }
   if (name === 'memory_replace'){
     const o = String(input.old_text || ''), n = String(input.new_text || '');
     if (!o || !mem.includes(o)) return { msg: 'その文はメモリに見つかりませんでした。メモリにある文をそのまま写してください。', note: null };
     p.memory = mem.replace(o, n);
-    return { msg: 'メモリを書きかえました。', note: 'メモリを書きかえたよ' };
+    return { msg: 'メモリを書きかえました。', note: 'メモリを書きかえたよ', op: { type: 'replace', old: o, new: n } };
   }
   if (name === 'memory_rewrite'){
     const c = String(input.content || '').trim();
     if (!c) return { msg: '中身が空だったので、書き直していません。', note: null };
+    p.memoryPrev = mem; // ひとつ前の版（お部屋の設定から戻せる）
     p.memory = c;
-    return { msg: 'メモリを整理して書き直しました。', note: 'メモリを整理したよ' };
+    return { msg: 'メモリを整理して書き直しました。', note: 'メモリを整理したよ', op: { type: 'rewrite', prev: mem, now: c } };
   }
   return { msg: 'その道具はありません。', note: null };
 }
@@ -1052,7 +1071,7 @@ async function converse(p, msgs, signal, onText, cutAt){
   if (cutAt && apiMsgs.length) apiMsgs[0].content.unshift({ type: 'text', text: '（ここより前の会話は、長くなったので省いてある。必要なら search_past で探せる）' });
   const o = { ttl: true, think: p.think !== false, display: true, cacheIdx: apiMsgs.length - 1 };
   let shown = '', thoughts = '';
-  const notes = [], logs = [];
+  const notes = [], logs = [], ops = [];
   for (let round = 0; round < 4; round++){
     const sep = shown.trim() ? '\n\n' : '';
     const usage = {};
@@ -1068,19 +1087,20 @@ async function converse(p, msgs, signal, onText, cutAt){
     if (r.text.trim()) shown += sep + r.text;
     const th = r.blocks.filter(b => b.type === 'thinking' && b.thinking).map(b => b.thinking).join('\n\n');
     if (th) thoughts += (thoughts ? '\n\n' : '') + th;
-    if (r.stop !== 'tool_use') return { text: shown, stop: r.stop, notes, thoughts, logs };
+    if (r.stop !== 'tool_use') return { text: shown, stop: r.stop, notes, thoughts, logs, ops };
     const results = [];
     for (const b of r.blocks.filter(b => b.type === 'tool_use')){
       const res = await runTool(p, b.name, b.input);
       if (res.note && !notes.includes(res.note)) notes.push(res.note);
       if (res.log && !logs.includes(res.log)) logs.push(res.log);
+      if (res.op) ops.push(res.op);
       results.push({ type: 'tool_result', tool_use_id: b.id, content: res.msg });
     }
     await savePersonas();
     apiMsgs.push({ role: 'assistant', content: r.blocks });
     apiMsgs.push({ role: 'user', content: results });
   }
-  return { text: shown, stop: 'end_turn', notes, thoughts, logs };
+  return { text: shown, stop: 'end_turn', notes, thoughts, logs, ops };
 }
 
 // 考えたことの日本語訳（開いたときだけ、一番安いモデルで）
@@ -1191,6 +1211,7 @@ async function runAssistant(cid){
       const m = { role: 'assistant', text: r.text, ts: Date.now() };
       if (r.stop === 'max_tokens') m.stopped = true;
       if (r.notes.length) m.notes = r.notes;
+      if (r.ops && r.ops.length) m.memOps = r.ops;
       if (r.thoughts) m.think = r.thoughts;
       if (r.logs && r.logs.length) m.shelf = r.logs;
       msgs.push(m);
@@ -1291,6 +1312,49 @@ const actions = {
     c.cutAt = c.cutOffer; c.cutOffer = null; c.cutSnooze = null;
     await saveChats(); toast('古いほうを切ったよ'); render({ keepScroll: true });
   },
+  async undoMem(t){
+    const cid = S.view.id, c = chat(cid), p = persona(c.personaId);
+    const m = S.msgs[cid][Number(t.dataset.i)];
+    if (!m || !m.memOps || m.memUndone) return;
+    let mem = p.memory || '', ok = true;
+    for (const op of [...m.memOps].reverse()){
+      if (op.type === 'add'){ const at = mem.lastIndexOf(op.text); if (at >= 0) mem = (mem.slice(0, at) + mem.slice(at + op.text.length)).replace(/\n{2,}/g, '\n').replace(/^\n|\n$/g, ''); else ok = false; }
+      else if (op.type === 'replace'){ if (mem.includes(op.new)) mem = mem.replace(op.new, op.old); else ok = false; }
+      else if (op.type === 'rewrite'){ if (mem === op.now) mem = op.prev; else ok = false; }
+    }
+    if (!ok && !confirm('そのあとにメモリが変わっているので、全部は元に戻せないかも。戻せるところだけ戻す？')) return;
+    p.memory = mem; m.memUndone = true;
+    await savePersonas(); await saveMsgs(cid);
+    toast('メモリを元に戻したよ'); render({ keepScroll: true });
+  },
+  async organizeLater(){
+    const c = chat(S.view.id), p = persona(c.personaId);
+    p.memSnooze = (p.memory || '').length + 1000;
+    await savePersonas(); render({ keepScroll: true });
+  },
+  async organizeMem(){
+    const cid = S.view.id, c = chat(cid), p = persona(c.personaId);
+    if (S.stream || S.ui.organizing) return;
+    if (!S.settings.apiKey){ toast('設定でAPIキーを貼ってね'); return; }
+    S.ui.organizing = true; render({ keepScroll: true });
+    const before = p.memory || '';
+    try {
+      const r = await converse(p, [{ role: 'user', text: '（アプリからのお願い）メモリが長くなってきたので、memory_rewrite を使ってメモリを整理してください。約束と変化は落とさず、重なりをまとめ、古くなったことは書き換えてください。終わったら、ひとことだけ返事をしてください。' }], new AbortController().signal, () => {}, 0);
+      if ((p.memory || '') !== before){ p.memSnooze = null; toast(`${p.name}がメモリを整理したよ`); }
+      else { p.memSnooze = before.length + 1000; toast('整理されなかったみたい。また今度声をかけるね'); }
+    } catch (e){ toast(e.message || '整理できなかったよ'); }
+    S.ui.organizing = false;
+    await savePersonas();
+    if (S.view.name === 'chat' && S.view.id === cid) render({ keepScroll: true });
+  },
+  restoreMem(){
+    collectPD();
+    const d = S.ui.pd;
+    if (!d.memoryPrev) return;
+    if (!confirm('メモリを、ひとつ前の版（整理する前）に戻す？今のメモリはひとつ前の版としてとっておくよ。')) return;
+    const now = d.memory; d.memory = d.memoryPrev; d.memoryPrev = now;
+    render(); toast('戻したよ。保存するのを忘れずにね');
+  },
   async cutLater(){
     const c = chat(S.view.id);
     c.cutSnooze = chatChars(await getMsgs(c.id), c.cutAt || 0) + 10000; c.cutOffer = null;
@@ -1329,6 +1393,7 @@ const actions = {
     const v = Number($('#cap').value); if (v > 0) S.settings.monthlyCap = v;
     const cv = Number($('#cutChars').value); if (cv >= 10000) S.settings.cutChars = cv;
     const cd = Math.round(Number($('#cycleDay').value)); if (cd >= 1 && cd <= 28) S.settings.cycleDay = cd;
+    const mc = Math.round(Number($('#memChars').value)); if (mc >= 1000) S.settings.memChars = mc;
     await saveSettings();
     toast('保存したよ');
   },
@@ -1434,6 +1499,7 @@ const changes = {
   sendDate(t){ S.settings.sendDate = t.checked; saveSettings(); },
   showThink(t){ S.settings.showThink = t.checked; saveSettings(); },
   userPrefs(t){ S.settings.userPrefs = t.value; saveSettings(); toast('個人設定を保存したよ'); },
+  memChars(t){ const v = Math.round(Number(t.value)); if (v >= 1000){ S.settings.memChars = v; saveSettings(); } },
   cycleDay(t){ const v = Math.round(Number(t.value)); if (v >= 1 && v <= 28){ S.settings.cycleDay = v; saveSettings(); } },
   cutChars(t){ const v = Number(t.value); if (v >= 10000){ S.settings.cutChars = v; saveSettings(); } },
   cap(t){ const v = Number(t.value); if (v > 0){ S.settings.monthlyCap = v; saveSettings(); } },
