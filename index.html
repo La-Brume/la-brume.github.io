@@ -233,7 +233,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.12.1';
+const APP_VERSION = '0.12.2';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -752,15 +752,14 @@ function layoutAnchor(scroll){
   if (!box || !sp) return;
   const el = S.ui.anchor != null ? box.querySelector(`[data-mi="${S.ui.anchor}"]`) : null;
   if (!el){ if (sp.style.height !== '0px') sp.style.height = '0px'; return; }
+  // 合わせる位置：短いメッセージは頭から全部見せる。長いメッセージは最後の一行だけが上に残るところまで上げる
+  const tgt = Math.max(0, el.offsetTop - 12, el.offsetTop + el.offsetHeight - 60);
   // 余白を一度0にしないで計算する（毎回0にすると画面がガタつく）
   const spH = sp.offsetHeight;
-  const below = box.scrollHeight - spH - el.offsetTop;
+  const below = box.scrollHeight - spH - tgt;
   const h = Math.max(0, box.clientHeight - below - 4);
   if (Math.abs(h - spH) > 1) sp.style.height = h + 'px';
-  if (scroll){
-    const tgt = Math.max(0, el.offsetTop - 12);
-    if (Math.abs(box.scrollTop - tgt) > 1) box.scrollTop = tgt;
-  }
+  if (scroll && Math.abs(box.scrollTop - tgt) > 1) box.scrollTop = tgt;
 }
 // 送った直後は、キーボードが閉じたりフォントが読み込まれたりして高さが変わるので、少し後にもう一度合わせる
 function anchorNow(box){
