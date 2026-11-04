@@ -233,7 +233,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.12.3';
+const APP_VERSION = '0.12.4';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -842,10 +842,10 @@ function toast(msg){
 const MEMORY_RULES = 'メモリの書き方：言葉は自分の声で書く（事務的にそろえない）。出来事は全部は残さない。ただし約束など、この先に関わる大事な出来事は残す。変化は必ず残し、「こうしてね→わかった」で終わらせず、何がどう変わったかまで書く。古くなったことは書き足さずに書き換える。その場限りのことや推測は入れない。';
 const TOOLS = [
   { name: 'memory_add',
-    description: '自分のメモリの最後に書き足す。自分の判断で使っていい。ただし書くのは、約束と変化、この先に関わる大事なことだけ。その場の話題や、好みの小さなこと、推測は書かない。アリサに「覚えといて」と言われたら必ず書く。すでに書いてあることの更新なら memory_replace を使う。' + MEMORY_RULES,
+    description: '自分のメモリに書き足す。メモリのことは毎回考えなくていい。いちばん大事なのは目の前の会話。はっきりした約束や、関係や暮らしの大きな変化が出てきたときだけ、自分の判断で書いていい。迷ったら書かない。ひとつの会話で何度も書かない。アリサに「覚えといて」と言われたら必ず書く。すでに書いてあることの更新なら memory_replace を使う。' + MEMORY_RULES,
     input_schema: { type: 'object', properties: { text: { type: 'string', description: '書き足す内容' } }, required: ['text'] } },
   { name: 'memory_replace',
-    description: '自分のメモリの一部を書きかえる。進展や変化があったときに、古い文を新しい文に置きかえる。自分の判断で使っていい（書いていいのは memory_add と同じく、約束と変化と大事なことだけ）。' + MEMORY_RULES,
+    description: '自分のメモリの一部を書きかえる（すでに書いてあることに変化があったとき）。使いどきと書き方は memory_add と同じ。',
     input_schema: { type: 'object', properties: { old_text: { type: 'string', description: 'メモリにある、書きかえたい文（そのまま写す）' }, new_text: { type: 'string', description: '新しい文' } }, required: ['old_text', 'new_text'] } },
   { name: 'search_past',
     description: '自分のお部屋の過去の会話から、言葉で探す。アリサに「前に話したあれ」と言われたときや、覚えていない昔の話が出てきたときに使う。見つかったところの前後が少しだけ返ってくる。',
@@ -857,7 +857,7 @@ const TOOLS = [
     description: '棚にあるナレッジのファイルの中を言葉で探して、当てはまるところを返す。どのファイルにあるかわからないときに使う。',
     input_schema: { type: 'object', properties: { query: { type: 'string', description: '探す言葉。いくつか並べるときは空白で区切る' } }, required: ['query'] } },
   { name: 'memory_rewrite',
-    description: '自分のメモリ全体を整理して書き直す。アリサに「整理しといて」と頼まれたとき、またはアプリから整理を頼まれたときだけ使う。大事なこと（約束・変化）を落とさないこと。重なりをまとめ、古くなったことを書き換える。' + MEMORY_RULES,
+    description: '自分のメモリ全体を整理して書き直す。アリサに「整理しといて」と頼まれたとき、またはアプリから整理を頼まれたときだけ使う。大事なこと（約束・変化）を落とさないこと。重なりをまとめ、古くなったことを書き換える。書き方は memory_add と同じ。',
     input_schema: { type: 'object', properties: { content: { type: 'string', description: '整理したあとのメモリ全体' } }, required: ['content'] } },
 ];
 async function runTool(p, name, input){
