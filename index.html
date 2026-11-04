@@ -233,7 +233,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.12.2';
+const APP_VERSION = '0.12.3';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -952,8 +952,7 @@ function toApiMessages(msgs){
   return out;
 }
 
-function buildBody(p, apiMsgs, o){
-  const cc = o.ttl ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
+function buildSystem(p, cc){
   // 並び順：個人設定 → カスタム指示 → ナレッジ → メモリ（変わらないものほど前）
   const system = [];
   const prefs = (S.settings.userPrefs || '').trim();
@@ -972,6 +971,15 @@ function buildBody(p, apiMsgs, o){
   system[system.length - 1].cache_control = cc;
   // 日付はキャッシュの外（1日1回しか変わらない）
   if (S.settings.sendDate) system.push({ type: 'text', text: `今日の日付：${jpDate()}` });
+  return system;
+}
+
+function buildBody(p, apiMsgs, o){
+  const cc = o.ttl ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
+  // system は、ひとつの返事のあいだ（道具を使って何回か往復するあいだ）は最初に作ったものをそのまま使う。
+  // 途中でメモリが書きかわっても作り直さない（考えた部分の署名が最初の system に結びついていて、変えるとエラーになるため）
+  if (!o.sysCache || o.sysCache.ttl !== o.ttl) o.sysCache = { ttl: o.ttl, sys: JSON.stringify(buildSystem(p, cc)) };
+  const system = JSON.parse(o.sysCache.sys);
 
   // 会話の最後にだけキャッシュの印（次の返事でそこまでを読み直せる）
   const messages = apiMsgs.map(m => ({ role: m.role, content: m.content.map(b => { const c = Object.assign({}, b); delete c.cache_control; return c; }) }));
