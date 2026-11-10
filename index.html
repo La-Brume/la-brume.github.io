@@ -237,7 +237,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.13';
+const APP_VERSION = '0.13.2';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -247,6 +247,7 @@ const MAX_TOKENS = 32000;
 // [モデル名, 入力, 出力, 表示名, キャッシュ読み込み]（1Mトークンあたりのドル。公式の料金表 2026.10.25）
 // キャッシュ書き込みは、どのモデルも5分＝入力×1.25、1時間＝入力×2
 const MODELS = [
+  ['claude-fable-5-2',  8, 40, 'Fable 5.2', 0.20], // 2026.11.09 公開（開発者サイトの「モデルを比較」で確認）
   ['claude-fable-5-1', 10, 50, 'Fable 5.1', 0.25],
   ['claude-fable-5',   10, 50, 'Fable 5',   1],
   ['claude-opus-5-5',   4, 20, 'Opus 5.5',  0.20],
