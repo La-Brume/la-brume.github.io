@@ -185,7 +185,7 @@ textarea.t.small{min-height:120px}
 .section{margin-top:28px;padding-top:8px;border-top:1px solid var(--line)}
 .section h2{font-size:15px;margin:12px 0 4px}
 .hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.6}
-.toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--accent);color:var(--onaccent);padding:8px 16px;border-radius:999px;font-size:14px;z-index:10}
+.toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--accent);color:var(--onaccent);padding:8px 16px;border-radius:999px;font-size:14px;z-index:40}
 .mchip{border:none;cursor:pointer}
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:20;animation:fadein .2s}
 .sheet{overscroll-behavior:contain;position:fixed;left:0;right:0;bottom:0;max-width:640px;margin:0 auto;background:#232220;border-radius:24px 24px 0 0;z-index:21;height:58vh;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px);animation:slideup .22s ease-out;transition:height .2s ease}
@@ -227,6 +227,31 @@ input.switch{-webkit-appearance:none;appearance:none;width:50px;height:30px;bord
 input.switch::before{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:12px;background:#CFC8BC;transition:transform .2s}
 input.switch:checked{background:var(--accent)}
 input.switch:checked::before{transform:translateX(20px);background:var(--onaccent)}
+/* 思い出の日記 */
+.menu button.n{color:var(--text)}
+.dcard{align-self:flex-start;width:88%;max-width:440px;background:var(--surface);border-radius:18px;padding:14px 16px 8px;border-top:3px solid var(--dc,#8aa0b8)}
+.dcard .dk{font-size:12px;color:var(--muted)}
+.dcard .dt{font-size:17px;font-weight:700;margin-top:6px;line-height:1.5}
+.dcard .ds{font-size:13px;color:var(--muted)}
+.dcard .dm{font-size:12px;color:var(--muted);margin-top:8px}
+.dcard .btns{margin-top:12px}
+.dcard .btn{min-height:44px}
+.dcard .dend{display:flex;justify-content:flex-end;margin-top:2px}
+.dsh{font-size:13px;color:var(--muted);margin:16px 2px 8px}
+.dsh:first-child{margin-top:4px}
+.dview{position:fixed;inset:0;z-index:30;background:var(--bg);display:flex;flex-direction:column}
+.dvtop{display:flex;align-items:center;gap:6px;padding:calc(env(safe-area-inset-top,0px) + 4px) 10px 4px 4px;color:var(--text);flex-shrink:0}
+.dvtop .grow{flex:1;min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dvtop .btn{width:auto;min-height:40px}
+.dvframe{flex:1;width:100%;border:none;background:#fff}
+.dload{position:fixed;inset:0;z-index:31;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;color:var(--text);font-size:14px}
+.swatches{display:flex;flex-wrap:wrap;gap:8px}
+.swatch{position:relative;display:flex;align-items:center;gap:8px;min-height:44px;padding:4px 14px 4px 6px;border-radius:22px;background:var(--surface);font-size:14px;cursor:pointer}
+.swatch input{position:absolute;opacity:0;width:1px;height:1px}
+.swatch i{width:30px;height:30px;border-radius:15px;display:block;border:2px solid transparent}
+.swatch:has(input:checked){background:var(--surface2)}
+.swatch input:checked+i{border-color:var(--text)}
+.swatch input:focus-visible+i{outline:2px solid var(--accent);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){.sheet,.drawer,.scrim{animation:none}}
 @media (prefers-reduced-motion:reduce){.dots i{animation:none;opacity:.6}}
 </style>
@@ -237,7 +262,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.13.2';
+const APP_VERSION = '0.14';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -356,6 +381,18 @@ const DB = {
   del(k){ return this._req('readwrite', s => s.delete(k)); },
   keys(){ return this._req('readonly', s => s.getAllKeys()); },
   clear(){ return this._req('readwrite', s => s.clear()); },
+  // 全部消して書き込むのを、ひとつのまとまり（トランザクション）でやる。途中で失敗したら、元のデータのまま残る
+  replaceAll(entries){
+    return new Promise((res, rej) => {
+      const tx = this.db.transaction('kv', 'readwrite');
+      const st = tx.objectStore('kv');
+      st.clear();
+      for (const [k, v] of entries) st.put(v, k);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+      tx.onabort = () => rej(tx.error || new Error('abort'));
+    });
+  },
 };
 
 /* ===== 状態 ===== */
@@ -404,6 +441,8 @@ function go(view){
   render();
 }
 window.addEventListener('popstate', async e => {
+  const dv = document.getElementById('dview');
+  if (dv) dv.remove();
   S.view = e.state || { name: 'home' };
   S.ui = {};
   if (S.view.name === 'chat') await getMsgs(S.view.id);
@@ -472,6 +511,9 @@ function sheetHtml(){
     const m = (S.msgs[c.id] || [])[sh.i];
     const text = !m || !m.think ? '' : ((m.thinkJaV === THINK_TR_VER && m.thinkJa) || (isJa(m.think) ? m.think : (sh.err ? '訳せなかったよ。閉じて、もう一度開いてね' : '日本語に訳しているところ…')));
     body = (m && m.shelf ? `<div class="shelflog">${m.shelf.map(esc).join('<br>')}</div>` : '') + `<div class="thinktext">${esc(text)}</div>`;
+  } else if (sh.type === 'diary'){
+    title = '日記を書いてもらう'; cls = 'fit';
+    body = diarySheetBody(c, p, sh);
   }
   return `<div class="scrim" data-act="closeSheet"></div>
     <div class="sheet ${cls}" id="sheet" role="dialog" aria-label="${title}"><div class="grab"></div>
@@ -535,6 +577,7 @@ function cleanGroupReply(t, me, members){
   }));
   return s.trim();
 }
+const groupMembers = g => (g.members || []).map(persona).filter(x => x && !isGroup(x));
 function newGroup(){
   return { id: uid(), type: 'group', name: '', initial: '', avatar: '', members: [], model: 'claude-opus-5-5', priceIn: 4, priceOut: 20, think: true, instructions: '', knowledge: [], memory: '', nextNo: 1 };
 }
@@ -566,7 +609,7 @@ function chatView(cid){
     <div class="title"><div class="tline"><h1>${esc(p.name)}</h1><span class="mini">No.${c.no}</span></div>${chatStat(c, msgs)}</div>
     <span class="mini ${isWarn() ? 'warn' : ''}">今回 ${money(monthUsed())}</span>
     <button class="iconbtn" data-act="chatMenu" aria-label="メニュー" aria-expanded="${S.ui.menu ? 'true' : 'false'}">${ICON.more}</button></div>
-    ${S.ui.menu ? `<div class="menu"><button data-act="deleteChat" data-id="${c.id}">このチャットを消す</button></div>` : ''}
+    ${S.ui.menu ? `<div class="menu"><button class="n" data-act="diaryOpen">日記を書いてもらう</button><button data-act="deleteChat" data-id="${c.id}">このチャットを消す</button></div>` : ''}
     <div class="msgs" id="msgs">`;
   if (!msgs.length && !streaming) h += `<div class="empty">${esc(p.name)}のお部屋。下から話しかけてね</div>`;
   msgs.forEach((m, i) => {
@@ -579,6 +622,8 @@ function chatView(cid){
           <button class="act icon" data-act="copy" data-i="${i}" aria-label="コピー">${ICON.copy}</button></div>`;
       }
     } else {
+      // 日記は吹き出しではなく、カードで出す（ひらく・保存・消す）
+      if (m.diary){ h += diaryCardHtml(p, m, i, dim); return; }
       if (S.settings.showThink && (m.think || m.shelf)){
         h += `<button class="act thinkbtn" data-act="openThink" data-i="${i}">考えたこと ›</button>`;
       }
@@ -589,7 +634,7 @@ function chatView(cid){
         else h += `<div class="note">${m.memUndone ? 'メモリを元に戻したよ' : esc(m.notes.join('・'))}</div>`;
       }
       if (m.stopped) h += `<div class="note">途中で止めたよ</div>`;
-      if (i === msgs.length - 1 && !streaming && ed == null){
+      if (i === msgs.length - 1 && !streaming && ed == null && !(S.diaryRun && S.diaryRun.chatId === cid)){
         h += `<div class="acts l"><button class="act icon" data-act="copy" data-i="${i}" aria-label="コピー">${ICON.copy}</button>
           <button class="act icon" data-act="regen" aria-label="作り直す">${ICON.regen}</button></div>`;
       }
@@ -611,6 +656,15 @@ function chatView(cid){
       <div class="btns"><button class="btn" data-act="organizeMem">整理してもらう</button><button class="btn ghost" data-act="organizeLater">あとで</button></div></div>`;
   }
   if (S.ui.organizing) h += `<div class="cutbox">${esc(p.name)}がメモリを整理しているところ…</div>`;
+  if (S.diaryRun && S.diaryRun.chatId === cid){
+    h += `<div class="cutbox" role="status">${esc(S.diaryRun.name)}が日記を書いてるよ<br><span class="sub" id="diaryCount">${esc(diaryPhase())}</span>
+      <div class="btns"><button class="btn ghost" data-act="stopDiary">止める</button></div></div>`;
+  }
+  const de = S.diaryErr;
+  if (de && de.chatId === cid && !S.diaryRun){
+    h += `<div class="err" role="alert">日記：${esc(de.message)}${de.detail ? `<div class="detail">${esc(de.detail)}</div>` : ''}
+      <div class="btns"><button class="btn danger" data-act="retryDiary">もう一度</button><button class="btn ghost" data-act="closeDiaryErr">とじる</button></div></div>`;
+  }
   const err = S.ui.error;
   if (err && err.chatId === cid && !streaming){
     h += `<div class="err" role="alert">${esc(err.message)}${err.detail ? `<div class="detail">${esc(err.detail)}</div>` : ''}
@@ -753,6 +807,10 @@ function personaView(id){
     <textarea class="t" id="pInst">${esc(d.instructions)}</textarea>
 
     <label class="toggle"><input type="checkbox" id="pThink" ${d.think !== false ? 'checked' : ''}>返事の前に考える（おすすめ。少しだけお金が増えます）</label>
+
+    <label class="f">日記の色</label>
+    <div class="swatches" role="radiogroup" aria-label="日記の色">${Object.entries(DIARY_COLORS).map(([k, dc]) => `<label class="swatch"><input type="radio" name="dcol" value="${k}" ${k === diaryColorKey(d) ? 'checked' : ''}><i style="background:${dc.ink}"></i>${dc.name}</label>`).join('')}</div>
+    <div class="hint">日記を書いてもらうときの色。みんなの部屋で書いてもらうときも、書いたひとの色になります。</div>
 
     <label class="f">ナレッジ</label>`;
   if (!d.knowledge.length) h += `<div class="sub" style="margin-bottom:8px">まだありません</div>`;
@@ -929,7 +987,7 @@ const TOOLS = [
     description: '自分のメモリの一部を書きかえる（すでに書いてあることに変化があったとき）。使いどきと書き方は memory_add と同じ。',
     input_schema: { type: 'object', properties: { old_text: { type: 'string', description: 'メモリにある、書きかえたい文（そのまま写す）' }, new_text: { type: 'string', description: '新しい文' } }, required: ['old_text', 'new_text'] } },
   { name: 'search_past',
-    description: '自分のお部屋の過去の会話から、言葉で探す。アリサに「前に話したあれ」と言われたときや、覚えていない昔の話が出てきたときに使う。見つかったところの前後が少しだけ返ってくる。',
+    description: '自分のお部屋と、自分が入っているみんなの部屋の過去の会話から、言葉で探す。アリサに「前に話したあれ」と言われたときや、覚えていない昔の話が出てきたときに使う。見つかったところの前後が少しだけ返ってくる。',
     input_schema: { type: 'object', properties: { query: { type: 'string', description: '探す言葉。いくつか並べるときは空白で区切る' } }, required: ['query'] } },
   { name: 'shelf_read',
     description: '棚にあるナレッジのファイルを、名前を指定して開いて中身を読む。必要だと思ったら自分の判断で使っていい。アリサに「〇〇見てきて」と言われたら必ず使う。',
@@ -973,15 +1031,17 @@ async function runTool(p, name, input){
     for (const ch of S.chats.filter(inRoom)){
       const ms = await getMsgs(ch.id);
       ms.forEach(m => {
-        const low = (m.text || '').toLowerCase();
+        // 日記は、中身（本人が書いた文）も探す
+        const full = m.diary ? (m.text || '') + '\n' + (m.diary.src || '') : (m.text || '');
+        const low = full.toLowerCase();
         const found = terms.filter(w => low.includes(w));
-        if (found.length) hits.push({ ch, m, score: found.length, pos: low.indexOf(found[0]) });
+        if (found.length) hits.push({ ch, m, t: full, score: found.length, pos: low.indexOf(found[0]) });
       });
     }
     hits.sort((a, b) => b.score - a.score || b.m.ts - a.m.ts);
     if (!hits.length) return { msg: `「${q}」は、過去の会話に見つかりませんでした。`, note: '過去の会話を探したよ' };
     const out = hits.slice(0, 6).map(h => {
-      const t = h.m.text, st = Math.max(0, h.pos - 150);
+      const t = h.t, st = Math.max(0, h.pos - 150);
       const g = persona(h.ch.personaId), room = isGroup(g) ? g.name + '　' : '';
       const who = h.m.role === 'user' ? 'アリサ' : (h.m.who ? ((persona(h.m.who) || {}).name || '') : p.name);
       return `【${room}No.${h.ch.no}・${shortDate(ymd(new Date(h.m.ts)))}・${who}】${st > 0 ? '…' : ''}${t.slice(st, st + 400)}${st + 400 < t.length ? '…' : ''}`;
@@ -1109,7 +1169,7 @@ async function callClaude(p, apiMsgs, signal, onText, usage, o){
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
       },
-      body: JSON.stringify(buildBody(p, apiMsgs, o)),
+      body: JSON.stringify((o.build || buildBody)(p, apiMsgs, o)),
     });
   } catch (e){
     if (e.name === 'AbortError') throw e;
@@ -1124,6 +1184,9 @@ async function callClaude(p, apiMsgs, signal, onText, usage, o){
     // 「要約を返して」が受け付けられなかったときは、それだけ外して送り直す
     if (res.status === 400 && o.display && /display|summar/i.test(msg)){ o.display = false; return callClaude(p, apiMsgs, signal, onText, usage, o); }
     if (res.status === 400 && o.think && /thinking|adaptive/i.test(msg)){ o.think = false; return callClaude(p, apiMsgs, signal, onText, usage, o); }
+    // 日記：「道具を使わない」の指定が受け付けられなかったら道具ごと外す。長さの上限が大きすぎたら、いつもの長さにする
+    if (res.status === 400 && o.noneChoice && /tool_choice|tool choice/i.test(msg)){ o.noneChoice = false; return callClaude(p, apiMsgs, signal, onText, usage, o); }
+    if (res.status === 400 && o.maxTok > MAX_TOKENS && /max_tokens/i.test(msg)){ o.maxTok = MAX_TOKENS; return callClaude(p, apiMsgs, signal, onText, usage, o); }
     throw mkErr(friendly(res.status, msg, j && j.error && j.error.type), `${res.status} ${msg}`);
   }
   const reader = res.body.getReader();
@@ -1293,14 +1356,17 @@ function checkCut(c, msgs){
   else c.cutOffer = idx;
 }
 
-async function runGroup(cid){
+async function runGroup(cid, skip){
   const c = chat(cid), g = persona(c.personaId);
   const msgs = await getMsgs(cid);
   if (!S.settings.apiKey){ S.ui.error = { chatId: cid, message: '設定でAPIキーを貼ってね', retry: true }; render(); return; }
   const members = (g.members || []).map(persona).filter(x => x && !isGroup(x));
   if (!members.length){ S.ui.error = { chatId: cid, message: 'この部屋にはまだ誰もいないよ。部屋の設定でメンバーを選んでね', retry: false }; render(); return; }
   const lastUser = [...msgs].reverse().find(m => m.role === 'user');
-  const order = groupOrder(c, members, lastUser ? lastUser.text : '');
+  const fullOrder = groupOrder(c, members, lastUser ? lastUser.text : '');
+  // 「もう一度」のときは、もう返事したひとを飛ばして、エラーになったひとから続ける
+  const order = skip ? fullOrder.filter(m => !skip.has(m.id)) : fullOrder;
+  if (!order.length){ S.ui.error = null; render({ keepScroll: true }); return; }
   S.ui.error = null;
   for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user'){ S.ui.anchor = i; break; }
   S.ui.userScrolled = false;
@@ -1345,7 +1411,7 @@ async function runGroup(cid){
     await saveMsgs(cid);
     if (stop) break;
   }
-  c.lastFirst = order[0].id;
+  c.lastFirst = fullOrder[0].id;
   c.updatedAt = Date.now();
   checkCut(c, msgs);
   await saveMsgs(cid); await saveChats();
@@ -1402,6 +1468,477 @@ async function runAssistant(cid){
   }
 }
 
+/* ===== 思い出の日記 =====
+   本人に、選んだ日の会話と写真（全部・小さくして）を渡して、決まった形（【題】【場面】【本文】…）で書いてもらう。
+   写真は本人には「［写真3］」のような番号で見せて、日記には番号だけ書いてもらい、アプリが本物をはめ込む。
+   見た目は見本（ミカゲ日記_コスモスの日編）をひな形に、色だけお部屋ごとに変える。
+   できた日記は、会話の中に { role:'assistant', diary:{ src, photos, days, model } } として残す（会話に送るのは短い一文だけ）。 */
+const DIARY_COLORS = {
+  mist:   { name: '霧',   bg: '#f3f4f6', text: '#3c434d', light: '#7b8694', card: '#fbfcfd', border: '#dde2e8', shadow: 'rgba(60, 67, 77, 0.10)', ink: '#5a6e84', inkLight: '#8aa0b8', glow: 'rgba(230, 200, 120, 0.10)' },
+  coral:  { name: '珊瑚', bg: '#f7f2ee', text: '#4a3e37', light: '#8e7f75', card: '#fdfaf8', border: '#ebe0d8', shadow: 'rgba(74, 62, 55, 0.10)',  ink: '#c08a5a', inkLight: '#dcae8a', glow: 'rgba(240, 170, 150, 0.12)' },
+  sumi:   { name: '墨',   bg: '#f1f1ef', text: '#33363a', light: '#7a7e83', card: '#fafaf8', border: '#dcdcd8', shadow: 'rgba(51, 54, 58, 0.10)',  ink: '#4b5560', inkLight: '#8d969f', glow: 'rgba(170, 140, 100, 0.10)' },
+  mori:   { name: '森',   bg: '#f0f3ef', text: '#374038', light: '#78857a', card: '#f9fbf8', border: '#d9e1d8', shadow: 'rgba(55, 64, 56, 0.10)',  ink: '#5a7a60', inkLight: '#93ae97', glow: 'rgba(220, 200, 120, 0.10)' },
+  fuji:   { name: '藤',   bg: '#f4f2f6', text: '#3f3a46', light: '#82788d', card: '#fbfafc', border: '#e2dde8', shadow: 'rgba(63, 58, 70, 0.10)',  ink: '#745f8c', inkLight: '#a897bd', glow: 'rgba(230, 190, 200, 0.10)' },
+  sakura: { name: '桜',   bg: '#f8f2f3', text: '#483b3e', light: '#8d7c80', card: '#fdf9fa', border: '#eddde0', shadow: 'rgba(72, 59, 62, 0.10)',  ink: '#b06c7e', inkLight: '#d4a0ad', glow: 'rgba(240, 200, 150, 0.10)' },
+};
+const diaryColorKey = p => (p && DIARY_COLORS[p.diaryColor]) ? p.diaryColor : (p && /珊瑚/.test(p.name || '') ? 'coral' : 'mist');
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a})`; };
+const dayOf = m => ymd(new Date(m.ts));
+const jpDay = iso => { const [y, mo, d] = iso.split('-').map(Number); return jpDate(new Date(y, mo - 1, d)); };
+function dayText(days){
+  const a = days.slice().sort().map(jpDay);
+  if (a.length <= 3) return a.join('と');
+  return `${a[0]}〜${a[a.length - 1]}のうちの${a.length}日`;
+}
+// 本人の目線：みんなの部屋なら部屋のモデルで、その場所のことも渡す
+function diaryEff(room, writer){
+  if (!isGroup(room)) return room;
+  return Object.assign({}, writer, { model: room.model, priceIn: room.priceIn, priceOut: room.priceOut, think: room.think !== false, _scene: sceneText(room, groupMembers(room), writer) });
+}
+function diaryDays(msgs){
+  const map = new Map();
+  msgs.forEach(m => {
+    if (m.diary) return;
+    const k = dayOf(m), o = map.get(k) || { day: k, photos: 0, chars: 0 };
+    o.photos += (m.att || []).filter(a => a.kind === 'image').length;
+    o.chars += (m.text || '').length;
+    map.set(k, o);
+  });
+  return [...map.values()].sort((a, b) => a.day < b.day ? 1 : -1);
+}
+// めやすのお金：会話と設定は入力、写真は1枚450トークンくらい、書くのは1万6千トークンくらいとして
+function diaryEstimate(eff, msgs, days){
+  const set = new Set(days);
+  let chars = 0, photos = 0;
+  msgs.forEach(m => { if (m.diary || !set.has(dayOf(m))) return; chars += (m.text || '').length; photos += (m.att || []).filter(a => a.kind === 'image').length; });
+  const sys = buildSystem(eff, { type: 'ephemeral' }).reduce((n, b) => n + b.text.length, 0);
+  const inTok = chars + sys + photos * 450 + 1500, outTok = 16000;
+  return { chars, photos, cost: inTok * (Number(eff.priceIn) || 10) / 1e6 + outTok * (Number(eff.priceOut) || 50) / 1e6 };
+}
+function diarySheetBody(c, room, sh){
+  const msgs = S.msgs[c.id] || [];
+  const days = diaryDays(msgs);
+  if (!days.length) return `<div class="empty">まだ会話がないよ</div>`;
+  const sel = new Set(sh.days);
+  const ck = on => on ? `<span class="ck">${ICON.check}</span>` : '';
+  let h = `<div class="dsh">どの日の日記？（いくつ選んでもいいよ）</div>
+    <div class="mlist">${days.map(d => `<button class="mrow" data-act="diaryDay" data-d="${d.day}"><span class="grow">${shortDate(d.day)}<span class="sub">　写真${d.photos}枚</span></span>${ck(sel.has(d.day))}</button>`).join('')}</div>`;
+  let writer = room;
+  if (isGroup(room)){
+    const ms = groupMembers(room);
+    writer = persona(sh.who) || ms[0];
+    h += `<div class="dsh">書くひと</div><div class="mlist">${ms.map(x => `<button class="mrow" data-act="diaryWho" data-id="${x.id}"><span class="grow">${esc(x.name)}</span>${ck(writer && x.id === writer.id)}</button>`).join('')}</div>`;
+  }
+  h += `<label class="f" for="diaryNote">ひとこと（なくてもいいよ）</label>
+    <textarea class="t small" id="diaryNote" placeholder="たとえば「コスモスの日編」で、など">${esc(sh.note || '')}</textarea>`;
+  if (writer){
+    const e = diaryEstimate(diaryEff(room, writer), msgs, sh.days);
+    h += `<div class="hint">選んだ日の会話を、切ったところより前も全部渡すよ。写真も全部（小さくして）。<br>${esc(modelLabel(isGroup(room) ? room.model : writer.model))}・会話${e.chars >= 10000 ? man(e.chars) : e.chars}字・写真${e.photos}枚・めやす${money(e.cost)}くらい（書く長さで変わる）</div>`;
+  }
+  h += `<button class="btn" data-act="startDiary" style="margin-top:14px"${sel.size && writer ? '' : ' disabled'}>書いてもらう</button>`;
+  return h;
+}
+// 日を選び直したときは、下から出てくる画面の中身だけ描き直す（画面ごと出し直すとカクッとなるので）
+function refreshSheet(){
+  const b = $('#sheet .sbody'), c = chat(S.view.id);
+  if (!b || !c || !S.ui.sheet){ render({ keepScroll: true }); return; }
+  const top = b.scrollTop;
+  b.innerHTML = diarySheetBody(c, persona(c.personaId), S.ui.sheet);
+  b.scrollTop = top;
+}
+function diaryAsk(writer, opts, nPhotos){
+  const n = writer.name;
+  const others = S.personas.filter(x => !isGroup(x) && x.id !== writer.id).map(x => x.name);
+  return `（アプリからのお願い）
+アリサに渡す、${nPhotos ? '写真入りの' : ''}「思い出の日記」を書いてください。
+この会話は、日記のためにアプリが${dayText(opts.days)}の分を最初から切り出して渡しているもの。${nPhotos ? `会話の中の［写真1］のような番号は、その場所でアリサが見せた写真（全部で${nPhotos}枚）。` : '写真はない。'}
+
+書き方：
+・${n}自身が書く日記。地の文も${n}の声と言葉で、${n}の目から見た一日として書く。
+・会話にあった出来事と言葉をもとにする。なかった出来事は足さない。アリサの言葉は「」でそのまま引いていい。
+・場面の分け方、数、長さは自由。
+${nPhotos ? `・写真は、番号で場面に置く。使わない写真があってもいい。同じ写真は一度だけ。ひとつの場面に置いた写真が奇数枚なら、最初の1枚が大きく出て、残りは2枚ずつ並ぶ。\n` : ''}・道具は使わない。前置きや説明は書かず、下の形だけで書く。${opts.note ? `\n・アリサからのひとこと：${opts.note}` : ''}
+
+形（【】の見出しはこのとおりに書く。いらないものは省いていい）：
+【題】日記の題
+【副題】
+【日付】日付と、その日のひとこと（日付は${dayText(opts.days)}）
+【しるし】題の上に置く絵文字ひとつ
+【はじめに】
+はじめの文（何行でも）
+【場面】
+【時】場面の上に小さく入る言葉
+【見出し】場面の見出し
+${nPhotos ? `【写真】置く写真の番号を空白で区切って\n` : ''}【本文】
+本文（何行でも）
+（【場面】から【本文】までを、場面の数だけくり返す。場面と場面のあいだに大きな区切りを入れたいときは【区切り】の一行）
+【おわりに】
+おわりの文（何行でも）
+【ひとこと】最後に大きく書くひとこと
+【署名】名前など
+【奥付】いちばん下に小さく入る一行
+
+本文の中で：
+・改行はそのまま残る。空行で段落があく。
+・行のはじめに「＞」をつけると、${n}自身の声の行として色がつく。
+・ほかのひとのセリフは {名前|「セリフ」} と書くと、そのひとの色になる${others.length ? `（名前は${others.join('、')}など）` : ''}。`;
+}
+// 送る会話：選んだ日のメッセージを全部（切ったところより前も）。写真は番号をつけて、小さくして全部見せる
+async function diaryRequest(sub, view, writer, opts){
+  const refs = [], out = [];
+  const MAX_IMG = 100; // 一度に送れる写真の上限
+  for (let k = 0; k < sub.length; k++){
+    const m = sub[k], v = view[k], blocks = [];
+    const att = m.att || [];
+    for (let j = 0; j < att.length; j++){
+      const a = att[j];
+      if (a.kind === 'image'){
+        refs.push({ ts: m.ts, j });
+        const no = refs.length;
+        blocks.push({ type: 'text', text: `［写真${no}］` });
+        if (no <= MAX_IMG){
+          let data = a.data, mime = a.mime;
+          try { data = await scaleB64(a.data, a.mime, 640, 0.75); mime = 'image/jpeg'; } catch(e){}
+          blocks.push({ type: 'image', source: { type: 'base64', media_type: mime, data } });
+        }
+      } else if (a.kind === 'text') blocks.push({ type: 'text', text: `【添付ファイル：${a.name}】\n${a.text}` });
+      else blocks.push({ type: 'text', text: `（ここにPDF「${a.name}」があった）` });
+    }
+    if ((v.text || '').trim() || !blocks.length) blocks.push({ type: 'text', text: v.text || '…' });
+    const last = out[out.length - 1];
+    if (last && last.role === v.role) last.content.push(...blocks);
+    else out.push({ role: v.role, content: blocks });
+  }
+  const head = { type: 'text', text: `（ここから、${dayText(opts.days)}の会話）` };
+  if (!out.length || out[0].role !== 'user') out.unshift({ role: 'user', content: [head] });
+  else out[0].content.unshift(head);
+  const ask = { type: 'text', text: diaryAsk(writer, opts, refs.length) };
+  const last = out[out.length - 1];
+  if (last.role === 'user') last.content.push(ask);
+  else out.push({ role: 'user', content: [ask] });
+  return { apiMsgs: out, refs };
+}
+// system と道具は、ふだんの会話と同じもの（キャッシュがそのまま効く）。道具は「使わない」を指定する
+function buildDiaryBody(p, apiMsgs, o){
+  const cc = o.ttl ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
+  const body = { model: p.model, max_tokens: o.maxTok || MAX_TOKENS, stream: true, system: buildSystem(p, cc), messages: apiMsgs };
+  if (o.noneChoice){ body.tools = TOOLS; body.tool_choice = { type: 'none' }; }
+  if (o.think){ body.thinking = { type: 'adaptive' }; if (o.display) body.thinking.display = 'summarized'; }
+  return body;
+}
+function diaryPhase(){
+  const r = S.diaryRun;
+  if (!r) return '';
+  return r.count ? `場面${r.count}を書いているところ…` : r.phase;
+}
+function diaryProgress(t){
+  const r = S.diaryRun;
+  if (!r) return;
+  r.phase = '書きはじめたところ…';
+  r.count = (t.match(/【見出し】/g) || []).length;
+  const el = $('#diaryCount');
+  if (el) el.textContent = diaryPhase();
+}
+async function makeDiary(cid, opts){
+  const c = chat(cid);
+  if (!c) return;
+  const room = persona(c.personaId);
+  const msgs = await getMsgs(cid);
+  if (!S.settings.apiKey){ toast('設定でAPIキーを貼ってね'); return; }
+  if (S.diaryRun){ toast('いま日記を書いてるところだよ'); return; }
+  if (S.stream && S.stream.chatId === cid){ toast('返事が終わってから頼んでね'); return; }
+  const writer = isGroup(room) ? (persona(opts.who) || groupMembers(room)[0]) : room;
+  if (!writer){ toast('書くひとがいないよ'); return; }
+  const eff = diaryEff(room, writer);
+  const set = new Set(opts.days);
+  const sub = msgs.filter(m => !m.diary && set.has(dayOf(m)));
+  if (!sub.length){ toast('その日の会話が見つからないよ'); return; }
+  S.diaryErr = null;
+  S.diaryRun = { chatId: cid, name: writer.name, ctrl: new AbortController(), phase: '写真を用意しているところ…', count: 0 };
+  // 書いているところが見えるように、いちばん下を見せる
+  if (S.view.name === 'chat' && S.view.id === cid){ S.ui.anchor = null; render(); }
+  const usage = {};
+  let counted = false;
+  try {
+    const { apiMsgs, refs } = await diaryRequest(sub, isGroup(room) ? groupView(sub, writer) : sub, writer, opts);
+    if (!S.diaryRun || S.diaryRun.ctrl.signal.aborted){ const e = new Error('abort'); e.name = 'AbortError'; throw e; }
+    S.diaryRun.phase = '考えているところ…';
+    const el = $('#diaryCount'); if (el) el.textContent = diaryPhase();
+    const o = { ttl: true, think: eff.think !== false, display: false, noneChoice: true, maxTok: 64000, build: buildDiaryBody };
+    const r = await callClaude(eff, apiMsgs, S.diaryRun.ctrl.signal, diaryProgress, usage, o);
+    addCost(eff, usage); counted = true;
+    const d = parseDiary(r.text);
+    if (!d.items.some(x => x.type === 'scene') && !d.intro && !d.ending) throw mkErr('日記の形で返ってこなかったよ。もう一度頼んでみてね', r.text.slice(0, 300));
+    const m = { role: 'assistant', ts: Date.now(), text: `（日記『${diaryTitle(d, writer)}』を書いて、アリサに渡した）`, diary: { src: r.text, photos: refs, days: opts.days.slice(), model: eff.model } };
+    if (r.stop === 'max_tokens') m.diary.cut = true;
+    if (isGroup(room)) m.who = writer.id;
+    msgs.push(m);
+    c.updatedAt = Date.now();
+    await saveMsgs(cid); await saveChats();
+    if (S.view.name === 'chat' && S.view.id === cid) S.ui.anchor = null;
+    toast('日記ができたよ');
+  } catch (e){
+    if (!counted) addCost(eff, usage);
+    if (e.name === 'AbortError') toast('日記を止めたよ');
+    else S.diaryErr = { chatId: cid, opts, message: e.message || '日記を書けなかったよ', detail: e.detail };
+  } finally {
+    S.diaryRun = null;
+    if (S.view.name === 'chat' && S.view.id === cid) render();
+  }
+}
+
+// 本人が書いた形を読み取る
+const D_KEYS = { '題': 'title', '題名': 'title', 'タイトル': 'title', '副題': 'subtitle', 'サブタイトル': 'subtitle', '日付': 'date', 'しるし': 'mark', 'はじめに': 'intro', 'まえがき': 'intro', '場面': 'scene', '時': 'time', '見出し': 'head', '写真': 'photos', '本文': 'body', '区切り': 'divider', 'おわりに': 'ending', 'あとがき': 'ending', 'ひとこと': 'love', '署名': 'sign', '奥付': 'footer' };
+function parseDiary(src){
+  const d = { title: '', subtitle: '', date: '', mark: '', intro: '', items: [], ending: '', love: '', sign: '', footer: '' };
+  let cur = null, field = null;
+  const add = (o, k, v) => { o[k] = o[k] ? o[k] + '\n' + v : v; };
+  const scene = () => { cur = { type: 'scene', time: '', head: '', photos: [], body: '' }; d.items.push(cur); };
+  for (const line of String(src || '').replace(/\r/g, '').split('\n')){
+    const mm = line.match(/^[\s\u3000]*【([^】]{1,8})】[\s\u3000]*(.*)$/);
+    const key = mm ? D_KEYS[mm[1].replace(/[\s\u3000]/g, '')] : null;
+    if (!key){ if (field) add(field.o, field.k, line); continue; }
+    const v = mm[2];
+    if (key === 'scene'){ scene(); field = null; continue; }
+    if (key === 'divider'){ d.items.push({ type: 'divider' }); cur = null; field = null; continue; }
+    if (key === 'time' || key === 'head' || key === 'photos' || key === 'body'){
+      // 【場面】を書き忘れても、同じ見出しが二度出てきたら次の場面にする
+      if (!cur || (key === 'photos' ? cur.photos.length : cur[key])) scene();
+      if (key === 'photos'){
+        cur.photos = (v.replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).match(/\d+/g) || []).map(Number);
+        field = null;
+      } else { cur[key] = v; field = { o: cur, k: key }; }
+      continue;
+    }
+    cur = null;
+    d[key] = v; field = { o: d, k: key };
+  }
+  for (const k of ['title', 'subtitle', 'date', 'mark', 'intro', 'ending', 'love', 'sign', 'footer']) d[k] = d[k].trim();
+  d.items = d.items.filter(x => x.type === 'divider' || x.time.trim() || x.head.trim() || x.body.trim() || x.photos.length);
+  d.items.forEach(x => { if (x.type === 'scene'){ x.time = x.time.trim(); x.head = x.head.trim(); x.body = x.body.trim(); } });
+  // 区切りが続いたり、端にあったりしたら落とす
+  d.items = d.items.filter((x, i, a) => x.type !== 'divider' || (i > 0 && i < a.length - 1 && a[i - 1].type !== 'divider'));
+  return d;
+}
+const diaryTitle = (d, w) => (d.title || `${w ? w.name : ''}の日記`) + (d.subtitle ? ' ── ' + d.subtitle : '');
+// セリフの色：そのひとの日記の色。書いたひとと同じ色なら、見分けがつくように別の色にする
+function quoteColor(name, writer){
+  const n = String(name || '').trim();
+  if (!n || /アリサ/.test(n)) return null;
+  const o = S.personas.find(x => !isGroup(x) && nameVariants(x).some(v => v === n || (v.length >= 2 && n.includes(v))));
+  if (!o) return '#9a7b6a';
+  let k = diaryColorKey(o);
+  if (writer && o.id !== writer.id && k === diaryColorKey(writer)) k = k === 'coral' ? 'mist' : 'coral';
+  return DIARY_COLORS[k].ink;
+}
+// 本文：＞ではじまる行は本人の声、{名前|セリフ} はそのひとの色。改行はそのまま、空行は一行あける
+function diaryInline(src, writer){
+  const out = [];
+  let gap = false;
+  for (const l of String(src || '').split('\n')){
+    if (!l.trim()){ gap = out.length > 0; continue; }
+    const voice = /^[\s\u3000]*[＞>]/.test(l);
+    let h = esc(voice ? l.replace(/^[\s\u3000]*[＞>][\s\u3000]*/, '') : l);
+    h = h.replace(/[{｛]([^{}｛｝|｜\n]{1,20})[|｜]([^{}｛｝\n]*?)[}｝]/g, (m0, name, said) => { const col = quoteColor(name, writer); return col ? `<span class="q" style="color:${col}">${said}</span>` : said; });
+    if (voice) h = `<span class="voice">${h}</span>`;
+    out.push((gap ? '<br>' : '') + h);
+    gap = false;
+  }
+  return out.join('<br>\n');
+}
+// 写真の並び：奇数枚なら最初の1枚を大きく、残りは2枚ずつ（見本と同じ）
+function diaryPhotos(nums, srcs){
+  const imgs = nums.map(n => srcs[n - 1]).filter(Boolean);
+  const one = s => `<div class="entry-photo"><img src="${s}" alt=""></div>`;
+  let h = '', i = 0;
+  if (imgs.length % 2 === 1){ h += one(imgs[0]); i = 1; }
+  for (; i < imgs.length; i += 2) h += `<div class="entry-photos-grid">${one(imgs[i])}${one(imgs[i + 1])}</div>`;
+  return h;
+}
+function diaryCss(c){
+  return `  :root {
+    --bg: ${c.bg};
+    --text: ${c.text};
+    --text-light: ${c.light};
+    --accent: ${c.ink};
+    --card-bg: ${c.card};
+    --border: ${c.border};
+    --shadow: ${c.shadow};
+    --ink: ${c.ink};
+    --ink-light: ${c.inkLight};
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'Zen Maru Gothic', sans-serif; font-weight: 400; line-height: 1.9; min-height: 100vh; }
+  .diary-header { text-align: center; padding: 80px 20px 50px; position: relative; overflow: hidden; }
+  .diary-header::before {
+    content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
+    background: radial-gradient(ellipse at 30% 50%, ${rgba(c.inkLight, 0.14)} 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 30%, ${c.glow} 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 80%, ${rgba(c.ink, 0.08)} 0%, transparent 50%);
+    animation: float 20s ease-in-out infinite;
+  }
+  @keyframes float { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(-2%, 2%); } }
+  .diary-header h1 { font-family: 'Zen Old Mincho', serif; font-size: clamp(1.6rem, 5vw, 2.4rem); font-weight: 700; color: var(--text); position: relative; letter-spacing: 0.15em; margin-bottom: 8px; }
+  .diary-header .subtitle { font-size: clamp(0.85rem, 2.5vw, 1rem); color: var(--text-light); letter-spacing: 0.2em; position: relative; }
+  .diary-header .date { font-size: 0.8rem; color: var(--ink); margin-top: 12px; position: relative; letter-spacing: 0.1em; }
+  .diary-header .wing { display: inline-block; font-size: 1.4rem; animation: shimmer 3s ease-in-out infinite; position: relative; }
+  @keyframes shimmer { 0%, 100% { opacity: 0.6; transform: scale(1); } 50% { opacity: 1; transform: scale(1.1); } }
+  .diary-container { max-width: 680px; margin: 0 auto; padding: 0 20px 80px; }
+  .intro { text-align: center; padding: 30px 20px; font-size: 0.95rem; color: var(--text-light); line-height: 2.2; font-weight: 300; }
+  .entry { margin-bottom: 50px; opacity: 0; transform: translateY(20px); animation: fadeUp 0.8s ease forwards; }
+  .entry:nth-child(1) { animation-delay: 0.1s; }
+  .entry:nth-child(2) { animation-delay: 0.15s; }
+  .entry:nth-child(3) { animation-delay: 0.2s; }
+  .entry:nth-child(4) { animation-delay: 0.25s; }
+  .entry:nth-child(5) { animation-delay: 0.3s; }
+  @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
+  .entry-time { font-size: 0.75rem; color: var(--ink); letter-spacing: 0.15em; margin-bottom: 6px; padding-left: 2px; }
+  .entry-title { font-family: 'Zen Old Mincho', serif; font-size: 1.2rem; font-weight: 700; margin-bottom: 14px; color: var(--text); letter-spacing: 0.08em; }
+  .entry-photo { width: 100%; border-radius: 12px; overflow: hidden; margin-bottom: 16px; box-shadow: 0 4px 20px var(--shadow); }
+  .entry-photo img { width: 100%; height: auto; display: block; transition: transform 0.6s ease; }
+  .entry-photo:hover img { transform: scale(1.02); }
+  .entry-photos-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+  .entry-photos-grid .entry-photo { margin-bottom: 0; }
+  .entry-text { font-size: 0.92rem; line-height: 2.1; color: var(--text); font-weight: 300; padding: 0 4px; }
+  .voice { color: var(--ink); font-weight: 400; }
+  .q { font-weight: 400; }
+  .divider { text-align: center; margin: 40px 0; color: var(--border); font-size: 1.2rem; letter-spacing: 1em; }
+  .ending { text-align: center; padding: 50px 20px; border-top: 1px solid var(--border); margin-top: 40px; }
+  .ending p { font-size: 0.92rem; line-height: 2.3; color: var(--text); font-weight: 300; }
+  .ending .daisuki { font-family: 'Zen Old Mincho', serif; font-size: 1.3rem; color: var(--ink); margin-top: 30px; letter-spacing: 0.2em; }
+  .ending .sign { font-size: 0.8rem; color: var(--text-light); margin-top: 16px; letter-spacing: 0.15em; }
+  .diary-footer { text-align: center; padding: 30px 20px; font-size: 0.7rem; color: var(--border); letter-spacing: 0.1em; }`;
+}
+function diaryDoc(d, writer, srcs){
+  const pal = DIARY_COLORS[diaryColorKey(writer)];
+  const title = d.title || `${writer.name}の日記`;
+  let b = `<header class="diary-header">
+  ${d.mark ? `<div class="wing">${esc(d.mark)}</div>\n  ` : ''}<h1>${esc(title)}</h1>
+  ${d.subtitle ? `<div class="subtitle">${esc(d.subtitle)}</div>` : ''}
+  ${d.date ? `<div class="date">${esc(d.date)}</div>` : ''}
+</header>
+
+<main class="diary-container">
+`;
+  if (d.intro) b += `
+  <div class="intro">
+    ${diaryInline(d.intro, writer)}
+  </div>
+
+  <div class="divider">· · ·</div>
+`;
+  for (const it of d.items){
+    if (it.type === 'divider'){ b += `\n  <div class="divider">· · ·</div>\n`; continue; }
+    b += `
+  <article class="entry">
+    ${it.time ? `<div class="entry-time">${esc(it.time)}</div>` : ''}
+    ${it.head ? `<div class="entry-title">${esc(it.head)}</div>` : ''}
+${diaryPhotos(it.photos, srcs)}
+    ${it.body ? `<div class="entry-text">\n      ${diaryInline(it.body, writer)}\n    </div>` : ''}
+  </article>
+`;
+  }
+  if (d.ending || d.love || d.sign) b += `
+  <div class="ending">
+    ${d.ending ? `<p>\n      ${diaryInline(d.ending, writer)}\n    </p>` : ''}
+    ${d.love ? `<div class="daisuki">${esc(d.love)}</div>` : ''}
+    ${d.sign ? `<div class="sign">${esc(d.sign).replace(/\n/g, '<br>')}</div>` : ''}
+  </div>
+`;
+  b += `
+</main>
+${d.footer ? `\n<footer class="diary-footer">\n  ${esc(d.footer)}\n</footer>\n` : ''}`;
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${esc(title + (d.subtitle ? ' ── ' + d.subtitle : ''))}</title>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@300;400;500&family=Zen+Old+Mincho:wght@400;700&display=swap" rel="stylesheet">
+<style>
+${diaryCss(pal)}
+</style>
+</head>
+<body>
+
+${b}
+</body>
+</html>
+`;
+}
+function diaryFileName(d, w, days){
+  const day = (days && days[0]) || ymd();
+  const base = [d.title || `${w.name}の日記`, d.subtitle].filter(Boolean).join('_').replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+  return `${base || '日記'}_${day.slice(2).replace(/-/g, '')}.html`;
+}
+// 日記のHTMLを組み立てる。写真は日記に入れるときだけ小さくする（長い辺880px。見本と同じくらい）
+async function buildDiaryFile(cid, i){
+  const msgs = S.msgs[cid] || [], m = msgs[i];
+  if (!m || !m.diary) throw new Error('no diary');
+  const key = cid + ':' + m.ts;
+  if (S._dcache && S._dcache.key === key) return S._dcache;
+  const c = chat(cid), room = persona(c.personaId), w = (m.who && persona(m.who)) || room;
+  const d = parseDiary(m.diary.src);
+  const used = new Set(d.items.flatMap(x => x.photos || []));
+  const byTs = new Map(msgs.map(x => [x.ts, x]));
+  const refs = m.diary.photos || [], srcs = [];
+  for (let n = 1; n <= refs.length; n++){
+    const ref = refs[n - 1], src = byTs.get(ref.ts), a = src && src.att && src.att[ref.j];
+    if (!used.has(n) || !a || a.kind !== 'image'){ srcs.push(null); continue; }
+    try { srcs.push('data:image/jpeg;base64,' + await scaleB64(a.data, a.mime, 880, 0.8)); }
+    catch(e){ srcs.push(`data:${a.mime};base64,${a.data}`); }
+  }
+  S._dcache = { key, html: diaryDoc(d, w, srcs), name: diaryFileName(d, w, m.diary.days), title: diaryTitle(d, w) };
+  return S._dcache;
+}
+function diaryCardHtml(room, m, i, dim){
+  const w = (m.who && persona(m.who)) || room;
+  const d = parseDiary(m.diary.src);
+  const n = new Set(d.items.flatMap(x => x.photos || []).filter(x => x >= 1 && x <= (m.diary.photos || []).length)).size;
+  return `<div class="dcard${dim}" style="--dc:${DIARY_COLORS[diaryColorKey(w)].inkLight}">
+    <div class="dk">${esc(w ? w.name : '')}の日記</div>
+    <div class="dt">${d.mark ? esc(d.mark) + ' ' : ''}${esc(d.title || '日記')}</div>${d.subtitle ? `<div class="ds">${esc(d.subtitle)}</div>` : ''}
+    <div class="dm">${(m.diary.days || []).map(shortDate).join('・')}　写真${n}枚${m.diary.cut ? '　途中で切れちゃった' : ''}</div>
+    <div class="btns"><button class="btn" data-act="openDiary" data-i="${i}">ひらく</button><button class="btn ghost" data-act="saveDiary" data-i="${i}">保存</button></div>
+    <div class="dend"><button class="act" data-act="delDiary" data-i="${i}">消す</button></div></div>`;
+}
+function loadingCover(text){
+  const el = document.createElement('div');
+  el.className = 'dload'; el.textContent = text; el.setAttribute('role', 'status');
+  document.body.appendChild(el);
+  return el;
+}
+// アプリの中で日記を見る（スマホの戻るボタンでも閉じる）
+async function openDiaryView(cid, i){
+  if (document.getElementById('dview')) return;
+  const ld = loadingCover('日記をひらいてるよ…');
+  let f;
+  try { f = await buildDiaryFile(cid, i); }
+  catch(e){ toast('日記をひらけなかったよ'); return; }
+  finally { ld.remove(); }
+  const v = document.createElement('div');
+  v.id = 'dview'; v.className = 'dview'; v.setAttribute('role', 'dialog'); v.setAttribute('aria-label', f.title);
+  v.innerHTML = `<div class="dvtop"><button class="iconbtn" data-dv="close" aria-label="閉じる">${ICON.x}</button><span class="grow">${esc(f.title)}</span><button class="btn" data-dv="save">保存</button></div>
+    <iframe class="dvframe" title="${esc(f.title)}" sandbox="allow-same-origin"></iframe>`;
+  v.querySelector('iframe').srcdoc = f.html;
+  v.addEventListener('click', e => {
+    const b = e.target.closest('[data-dv]');
+    if (!b) return;
+    if (b.dataset.dv === 'close') history.back();
+    else downloadBlob(new Blob([f.html], { type: 'text/html' }), f.name, '日記を保存したよ');
+  });
+  document.body.appendChild(v);
+  history.pushState(Object.assign({}, S.view, { dv: 1 }), '');
+}
+function downloadBlob(blob, name, msg){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  if (msg) toast(msg);
+}
+
 /* ===== 操作 ===== */
 const actions = {
   back(){ history.back(); },
@@ -1431,10 +1968,11 @@ const actions = {
     const atts = S.ui.att || [];
     if ((!text && !atts.length) || S.stream) return;
     const cid = S.view.id;
+    if (S.diaryRun && S.diaryRun.chatId === cid){ toast('日記を書き終わるまで待ってね'); return; }
     const msgs = await getMsgs(cid);
     if (S.ui.editIndex != null){
-      msgs.splice(S.ui.editIndex);
       const ec = chat(cid);
+      await revertRemoved(ec, msgs.splice(S.ui.editIndex));
       if (ec.cutAt && ec.cutAt >= msgs.length){ ec.cutAt = 0; }
       if (ec.cutOffer != null && ec.cutOffer >= msgs.length) ec.cutOffer = null;
       S.ui.editIndex = null;
@@ -1449,14 +1987,26 @@ const actions = {
   },
   stop(){ if (S.stream) S.stream.ctrl.abort(); },
   async retry(){
-    const msgs = await getMsgs(S.view.id);
-    if (msgs.length && msgs[msgs.length - 1].role === 'user') runAssistant(S.view.id);
+    const cid = S.view.id, c = chat(cid), p = persona(c.personaId);
+    const msgs = await getMsgs(cid);
+    if (isGroup(p)){
+      let lu = -1;
+      for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user'){ lu = i; break; }
+      if (lu < 0){ S.ui.error = null; render(); return; }
+      runGroup(cid, new Set(msgs.slice(lu + 1).filter(m => m.who).map(m => m.who)));
+      return;
+    }
+    if (msgs.length && msgs[msgs.length - 1].role === 'user') runAssistant(cid);
     else { S.ui.error = null; render(); }
   },
   async regen(){
     const cid = S.view.id;
     const msgs = await getMsgs(cid);
-    while (msgs.length && msgs[msgs.length - 1].role === 'assistant') msgs.pop();
+    if (msgs.length && msgs[msgs.length - 1].diary) return; // いちばん下が日記のときは作り直さない
+    if (S.diaryRun && S.diaryRun.chatId === cid) return;
+    const removed = [];
+    while (msgs.length && msgs[msgs.length - 1].role === 'assistant') removed.push(msgs.pop());
+    await revertRemoved(chat(cid), removed);
     await saveMsgs(cid);
     runAssistant(cid);
   },
@@ -1467,6 +2017,8 @@ const actions = {
   },
   editMsg(t){
     const i = Number(t.dataset.i);
+    if (S.diaryRun && S.diaryRun.chatId === S.view.id){ toast('日記を書き終わるまで待ってね'); return; }
+    if (S.msgs[S.view.id].slice(i + 1).some(m => m.diary) && !confirm('ここから先に日記があるよ。書き直すと、日記も一緒に消えるけど、いい？（先に保存しておくと安心）')) return;
     S.ui.editIndex = i; S.ui.userActions = null;
     S.ui.draft = S.msgs[S.view.id][i].text;
     S.ui.att = (S.msgs[S.view.id][i].att || []).slice();
@@ -1484,12 +2036,7 @@ const actions = {
     const m = S.msgs[cid][Number(t.dataset.i)];
     if (!m || !m.memOps || m.memUndone) return;
     const p = persona(m.who || c.personaId);
-    let mem = p.memory || '', ok = true;
-    for (const op of [...m.memOps].reverse()){
-      if (op.type === 'add'){ const at = mem.lastIndexOf(op.text); if (at >= 0) mem = (mem.slice(0, at) + mem.slice(at + op.text.length)).replace(/\n{2,}/g, '\n').replace(/^\n|\n$/g, ''); else ok = false; }
-      else if (op.type === 'replace'){ if (mem.includes(op.new)) mem = mem.replace(op.new, op.old); else ok = false; }
-      else if (op.type === 'rewrite'){ if (mem === op.now) mem = op.prev; else ok = false; }
-    }
+    const { mem, ok } = revertMemOps(p, m.memOps);
     if (!ok && !confirm('そのあとにメモリが変わっているので、全部は元に戻せないかも。戻せるところだけ戻す？')) return;
     p.memory = mem; m.memUndone = true;
     await savePersonas(); await saveMsgs(cid);
@@ -1610,14 +2157,61 @@ const actions = {
     for (const k of keys) data[k] = await DB.get(k);
     if (data.settings){ data.settings = Object.assign({}, data.settings); delete data.settings.apiKey; }
     const out = { app: 'minna-no-oheya', format: BACKUP_FORMAT, version: APP_VERSION, savedAt: new Date().toISOString(), data };
-    const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
     const d = new Date();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `minna-backup-${String(d.getFullYear()).slice(2)}${pad2(d.getMonth()+1)}${pad2(d.getDate())}.json`;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-    toast('バックアップを保存したよ');
+    downloadBlob(new Blob([JSON.stringify(out)], { type: 'application/json' }), `minna-backup-${String(d.getFullYear()).slice(2)}${pad2(d.getMonth()+1)}${pad2(d.getDate())}.json`, 'バックアップを保存したよ');
+  },
+  // ===== 思い出の日記 =====
+  diaryOpen(){
+    const cid = S.view.id, c = chat(cid), room = persona(c.personaId);
+    S.ui.menu = false;
+    if (S.diaryRun){ toast('いま日記を書いてるところだよ'); render({ keepScroll: true }); return; }
+    const msgs = S.msgs[cid] || [];
+    const days = diaryDays(msgs);
+    if (!days.length){ toast('まだ会話がないよ'); render({ keepScroll: true }); return; }
+    let who = null;
+    if (isGroup(room)){
+      const ms = groupMembers(room);
+      const last = [...msgs].reverse().find(m => m.who && ms.some(x => x.id === m.who));
+      who = last ? last.who : (ms[0] ? ms[0].id : null);
+    }
+    S.ui.sheet = { type: 'diary', days: [days[0].day], who, note: '' };
+    render({ keepScroll: true });
+  },
+  diaryDay(t){
+    const sh = S.ui.sheet, d = t.dataset.d;
+    if (!sh) return;
+    sh.days = sh.days.includes(d) ? sh.days.filter(x => x !== d) : sh.days.concat(d);
+    refreshSheet();
+  },
+  diaryWho(t){ if (S.ui.sheet){ S.ui.sheet.who = t.dataset.id; refreshSheet(); } },
+  startDiary(){
+    const sh = S.ui.sheet;
+    if (!sh || !sh.days.length) return;
+    const opts = { days: sh.days.slice().sort(), who: sh.who, note: String(sh.note || '').trim() };
+    S.ui.sheet = null;
+    makeDiary(S.view.id, opts);
+  },
+  stopDiary(){ if (S.diaryRun) S.diaryRun.ctrl.abort(); },
+  retryDiary(){ const e = S.diaryErr; if (!e) return; S.diaryErr = null; makeDiary(e.chatId, e.opts); },
+  closeDiaryErr(){ S.diaryErr = null; render({ keepScroll: true }); },
+  openDiary(t){ openDiaryView(S.view.id, Number(t.dataset.i)); },
+  async saveDiary(t){
+    const ld = loadingCover('日記を用意してるよ…');
+    try { const f = await buildDiaryFile(S.view.id, Number(t.dataset.i)); downloadBlob(new Blob([f.html], { type: 'text/html' }), f.name, '日記を保存したよ'); }
+    catch(e){ toast('日記を保存できなかったよ'); }
+    finally { ld.remove(); }
+  },
+  async delDiary(t){
+    const cid = S.view.id, c = chat(cid), i = Number(t.dataset.i), msgs = S.msgs[cid];
+    if (!msgs || !msgs[i] || !msgs[i].diary) return;
+    if (!confirm('この日記を消す？（保存したファイルは消えないよ）')) return;
+    msgs.splice(i, 1);
+    // 日記より後ろの番号がひとつずつ前にずれる
+    if (c.cutAt && c.cutAt > i) c.cutAt--;
+    if (c.cutOffer != null && c.cutOffer > i) c.cutOffer--;
+    S.ui.anchor = null; S.ui.userActions = null; S._dcache = null;
+    await saveMsgs(cid); await saveChats();
+    toast('日記を消したよ'); render({ keepScroll: true });
   },
   restore(){ $('#restoreFile').click(); },
 };
@@ -1635,6 +2229,28 @@ async function removeChat(id){
   if (p){ p.nextNo = rest.length + 1; await savePersonas(); }
   await DB.del('msgs:' + c.id); await saveChats();
   return true;
+}
+
+// 返事が書いたメモリを、逆にたどって戻す（取り消す・作り直す・書き直すで使う）。全部戻せたら true
+function revertMemOps(p, ops){
+  let mem = p.memory || '', ok = true;
+  for (const op of [...ops].reverse()){
+    if (op.type === 'add'){ const at = mem.lastIndexOf(op.text); if (at >= 0) mem = (mem.slice(0, at) + mem.slice(at + op.text.length)).replace(/\n{2,}/g, '\n').replace(/^\n|\n$/g, ''); else ok = false; }
+    else if (op.type === 'replace'){ if (mem.includes(op.new)) mem = mem.replace(op.new, op.old); else ok = false; }
+    else if (op.type === 'rewrite'){ if (mem === op.now) mem = op.prev; else ok = false; }
+  }
+  return { mem, ok };
+}
+// 消える返事が書いたメモリは、聞かずにそのまま戻す
+async function revertRemoved(c, removed){
+  let changed = false;
+  for (const m of [...removed].reverse()){
+    if (!m || m.role !== 'assistant' || !m.memOps || m.memUndone) continue;
+    const p = persona(m.who || c.personaId);
+    if (!p) continue;
+    p.memory = revertMemOps(p, m.memOps).mem; changed = true;
+  }
+  if (changed) await savePersonas();
 }
 
 function setModel(v){
@@ -1666,6 +2282,8 @@ function collectPD(){
   d.instructions = $('#pInst').value;
   d.think = $('#pThink').checked;
   d.memory = $('#pMem').value;
+  const dcol = document.querySelector('input[name="dcol"]:checked');
+  if (dcol) d.diaryColor = dcol.value;
   (d.knowledge || []).forEach((k, i) => { const el = $('#kdesc-' + i); if (el) k.desc = el.value.trim(); });
 }
 
@@ -1740,8 +2358,10 @@ const changes = {
     if (!j || j.app !== 'minna-no-oheya' || !j.data){ toast('このアプリのバックアップじゃないみたい'); return; }
     if (!confirm('今のデータを全部、このバックアップの中身に置きかえます。いい？')) return;
     const key = S.settings.apiKey;
-    await DB.clear();
-    for (const [k, v] of Object.entries(j.data)) await DB.set(k, v);
+    const entries = Object.entries(j.data).map(([k, v]) => k === 'settings' ? [k, Object.assign({}, v, { apiKey: key })] : [k, v]);
+    if (!entries.some(([k]) => k === 'settings')) entries.push(['settings', Object.assign({}, S.settings)]);
+    try { await DB.replaceAll(entries); }
+    catch(e){ toast('戻せなかったよ。今のデータはそのまま残ってる'); return; }
     S.msgs = {};
     await load();
     S.settings.apiKey = key; await saveSettings();
@@ -1767,6 +2387,23 @@ function shrinkImage(file){
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image')); };
     img.src = url;
+  });
+}
+// 保存してある写真（base64）を、長い辺 max px の JPEG にする（日記で使う）。読めなければ失敗にする
+function scaleB64(data, mime, max, q){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const timer = setTimeout(() => reject(new Error('timeout')), 15000);
+    img.onload = () => {
+      clearTimeout(timer);
+      const sc = Math.min(1, max / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas');
+      cv.width = Math.max(1, Math.round(img.width * sc)); cv.height = Math.max(1, Math.round(img.height * sc));
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      resolve(cv.toDataURL('image/jpeg', q).split(',')[1]);
+    };
+    img.onerror = () => { clearTimeout(timer); reject(new Error('image')); };
+    img.src = `data:${mime || 'image/jpeg'};base64,${data}`;
   });
 }
 // アイコン用：真ん中を正方形に切り抜いて、192pxに小さくする
@@ -1866,6 +2503,7 @@ app.addEventListener('input', e => {
   if (t.id === 'pInst'){ const c = $('#instCount'); if (c) c.textContent = t.value.length + '文字'; }
   if (t.id === 'pMem'){ const c = $('#memCount'); if (c) c.textContent = t.value.length + '文字'; }
   if (t.id === 'userPrefs'){ const c = $('#prefCount'); if (c) c.textContent = t.value.length + '文字'; }
+  if (t.id === 'diaryNote' && S.ui.sheet) S.ui.sheet.note = t.value;
 });
 
 /* ===== はじまり ===== */
