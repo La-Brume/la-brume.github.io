@@ -262,7 +262,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.14';
+const APP_VERSION = '0.14.1';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -441,8 +441,13 @@ function go(view){
   render();
 }
 window.addEventListener('popstate', async e => {
+  // 日記を閉じたとき：下のチャットはそのまま（読んでいた位置も、書きかけも残す）
   const dv = document.getElementById('dview');
-  if (dv) dv.remove();
+  if (dv){
+    dv.remove();
+    const st = e.state;
+    if (st && st.name === S.view.name && st.id === S.view.id) return;
+  }
   S.view = e.state || { name: 'home' };
   S.ui = {};
   if (S.view.name === 'chat') await getMsgs(S.view.id);
@@ -549,7 +554,7 @@ const whoHtml = (g, id) => { const m = persona(id), c = memberColor(g, id); retu
 function groupView(msgs, me){
   return msgs.map(m => {
     if (m.role === 'user') return { role: 'user', text: '【アリサ】' + (m.text || ''), att: m.att };
-    if (m.who === me.id) return { role: 'assistant', text: m.text };
+    if (m.who === me.id) return { role: 'assistant', text: m.text, shelf: m.shelf };
     const o = persona(m.who);
     return { role: 'user', text: `【${o ? o.name : 'だれか'}】` + m.text };
   });
@@ -1005,7 +1010,7 @@ async function runTool(p, name, input){
   if (name === 'shelf_read'){
     const n = String(input.name || '').trim();
     const k = shelf.find(x => x.name === n) || shelf.find(x => n && (x.name.includes(n) || n.includes(x.name)));
-    if (!k) return { msg: `棚に「${n}」は見つかりませんでした。棚にあるのは：${shelf.map(x => x.name).join('、') || 'なし'}`, note: null, log: null };
+    if (!k) return { msg: `棚に「${n}」は見つかりませんでした。棚にあるのは：${shelf.map(x => x.name).join('、') || 'なし'}`, note: null, log: `棚の「${n}」を開こうとしたけど、なかった` };
     const MAX = 50000;
     return { msg: `【${k.name}】\n${k.text.length > MAX ? k.text.slice(0, MAX) + '\n（長いので、ここまで）' : k.text}`, note: null, log: `棚の「${k.name}」を開いた` };
   }
@@ -1018,9 +1023,9 @@ async function runTool(p, name, input){
       const low = k.text.toLowerCase();
       terms.forEach(w => { let at = low.indexOf(w), n = 0; while (at >= 0 && n < 3){ hits.push({ k, at }); at = low.indexOf(w, at + w.length); n++; } });
     });
-    if (!hits.length) return { msg: `棚の中に「${q}」は見つかりませんでした。`, note: null, log: `棚で「${q}」を探した` };
+    if (!hits.length) return { msg: `棚の中に「${q}」は見つかりませんでした。`, note: null, log: `棚で「${q}」を探した。見つからなかった` };
     const out = hits.slice(0, 6).map(h => { const st = Math.max(0, h.at - 200); return `【${h.k.name}】${st > 0 ? '…' : ''}${h.k.text.slice(st, st + 450)}${st + 450 < h.k.text.length ? '…' : ''}`; }).join('\n\n');
-    return { msg: out, note: null, log: `棚で「${q}」を探した` };
+    return { msg: out, note: null, log: `棚で「${q}」を探した。見つかった` };
   }
   if (name === 'search_past'){
     const q = String(input.query || '').trim();
@@ -1039,14 +1044,14 @@ async function runTool(p, name, input){
       });
     }
     hits.sort((a, b) => b.score - a.score || b.m.ts - a.m.ts);
-    if (!hits.length) return { msg: `「${q}」は、過去の会話に見つかりませんでした。`, note: '過去の会話を探したよ' };
+    if (!hits.length) return { msg: `「${q}」は、過去の会話に見つかりませんでした。`, note: '過去の会話を探したよ', log: `過去の会話を「${q}」で探した。見つからなかった` };
     const out = hits.slice(0, 6).map(h => {
       const t = h.t, st = Math.max(0, h.pos - 150);
       const g = persona(h.ch.personaId), room = isGroup(g) ? g.name + '　' : '';
       const who = h.m.role === 'user' ? 'アリサ' : (h.m.who ? ((persona(h.m.who) || {}).name || '') : p.name);
       return `【${room}No.${h.ch.no}・${shortDate(ymd(new Date(h.m.ts)))}・${who}】${st > 0 ? '…' : ''}${t.slice(st, st + 400)}${st + 400 < t.length ? '…' : ''}`;
     }).join('\n\n');
-    return { msg: out, note: '過去の会話を探したよ' };
+    return { msg: out, note: '過去の会話を探したよ', log: `過去の会話を「${q}」で探した。${hits.length}か所見つかった` };
   }
   const mem = p.memory || '';
   if (name === 'memory_add'){
@@ -1078,8 +1083,13 @@ function toApiMessages(msgs){
   msgs.forEach((m, i) => (m.att || []).forEach((a, j) => { if (a.kind !== 'text') heavy.push(i + ':' + j); }));
   const keep = new Set(heavy.slice(-KEEP_HEAVY));
   const out = [];
+  // 道具を使ったこと（m.shelf）は保存した返事に一行だけ残っている。次のアリサのメッセージの頭に、アプリからの一言として送る
+  // （道具のやりとりそのものは保存しないので、これがないと「探してない」と思って同じことをくり返す）
+  let used = [];
   msgs.forEach((m, i) => {
     const blocks = [];
+    if (m.role === 'user' && used.length){ blocks.push({ type: 'text', text: `（アプリから：前の返事のときに、${used.join('。')}）` }); used = []; }
+    if (m.role === 'assistant' && m.shelf && m.shelf.length) used.push(...m.shelf);
     (m.att || []).forEach((a, j) => {
       if (a.kind === 'text') blocks.push({ type: 'text', text: `【添付ファイル：${a.name}】\n${a.text}` });
       else if (!keep.has(i + ':' + j)) blocks.push({ type: 'text', text: `（ここに${a.kind === 'image' ? '写真' : 'PDF'}「${a.name}」があった。古いので、今はもう見えない）` });
@@ -1875,9 +1885,10 @@ function diaryFileName(d, w, days){
 async function buildDiaryFile(cid, i){
   const msgs = S.msgs[cid] || [], m = msgs[i];
   if (!m || !m.diary) throw new Error('no diary');
-  const key = cid + ':' + m.ts;
-  if (S._dcache && S._dcache.key === key) return S._dcache;
   const c = chat(cid), room = persona(c.personaId), w = (m.who && persona(m.who)) || room;
+  // みんなの日記の色も覚えておく。色が変わっていたら作り直す（セリフの色も変わるので、全員分）
+  const key = cid + ':' + m.ts + ':' + S.personas.filter(x => !isGroup(x)).map(x => x.id + '=' + diaryColorKey(x)).join(',');
+  if (S._dcache && S._dcache.key === key) return S._dcache;
   const d = parseDiary(m.diary.src);
   const used = new Set(d.items.flatMap(x => x.photos || []));
   const byTs = new Map(msgs.map(x => [x.ts, x]));
@@ -1993,7 +2004,7 @@ const actions = {
       let lu = -1;
       for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user'){ lu = i; break; }
       if (lu < 0){ S.ui.error = null; render(); return; }
-      runGroup(cid, new Set(msgs.slice(lu + 1).filter(m => m.who).map(m => m.who)));
+      runGroup(cid, new Set(msgs.slice(lu + 1).filter(m => m.who && !m.diary).map(m => m.who)));
       return;
     }
     if (msgs.length && msgs[msgs.length - 1].role === 'user') runAssistant(cid);
@@ -2362,7 +2373,7 @@ const changes = {
     if (!entries.some(([k]) => k === 'settings')) entries.push(['settings', Object.assign({}, S.settings)]);
     try { await DB.replaceAll(entries); }
     catch(e){ toast('戻せなかったよ。今のデータはそのまま残ってる'); return; }
-    S.msgs = {};
+    S.msgs = {}; S._dcache = null;
     await load();
     S.settings.apiKey = key; await saveSettings();
     S.view = { name: 'home' }; S.ui = {};
