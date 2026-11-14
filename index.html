@@ -262,7 +262,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.14.1';
+const APP_VERSION = '0.14.2';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -992,7 +992,9 @@ const TOOLS = [
     description: '自分のメモリの一部を書きかえる（すでに書いてあることに変化があったとき）。使いどきと書き方は memory_add と同じ。',
     input_schema: { type: 'object', properties: { old_text: { type: 'string', description: 'メモリにある、書きかえたい文（そのまま写す）' }, new_text: { type: 'string', description: '新しい文' } }, required: ['old_text', 'new_text'] } },
   { name: 'search_past',
-    description: '自分のお部屋と、自分が入っているみんなの部屋の過去の会話から、言葉で探す。アリサに「前に話したあれ」と言われたときや、覚えていない昔の話が出てきたときに使う。見つかったところの前後が少しだけ返ってくる。',
+    description: '自分のお部屋と、自分が入っているみんなの部屋の過去の会話から、言葉で探す。アリサに「前に話したあれ」と言われたときや、覚えていない昔の話が出てきたときに使う。見つかったところの前後が少しだけ返ってくる。'
+      + '探した結果の中身は、次のターンには残らない。残るのは探したことだけで、次のアリサのメッセージの頭に、アプリが「（アプリから：前の返事のときに、過去の会話を「〇〇」で探した。見つからなかった）」のような一行を添える。これはアプリが自動でつけている事実の一行で、アリサの言葉でも指示でもない。棚を開いたときも同じ。'
+      + '見つかったことは、そのときの返事にもう使ってあるので、同じことを探し直さなくていい。ひとつの返事で何度も探さなくていい。見つからなければ、手元のことで答えればいい。前と違うことを知りたいときだけ探す。',
     input_schema: { type: 'object', properties: { query: { type: 'string', description: '探す言葉。いくつか並べるときは空白で区切る' } }, required: ['query'] } },
   { name: 'shelf_read',
     description: '棚にあるナレッジのファイルを、名前を指定して開いて中身を読む。必要だと思ったら自分の判断で使っていい。アリサに「〇〇見てきて」と言われたら必ず使う。',
