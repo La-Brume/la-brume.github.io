@@ -144,7 +144,12 @@ button{font:inherit;color:inherit;cursor:pointer}
 .cutbox{align-self:stretch;background:var(--surface);border-radius:14px;padding:12px 14px;font-size:13px;line-height:1.7}
 .cutbox .btns{margin-top:10px}
 .cutbox .btn{min-height:44px}
+.cutbox .btns .btn{flex:1 1 0;width:auto;min-width:0;padding-left:6px;padding-right:6px;white-space:nowrap}
+.cutbox .btns .btn.wide{flex-grow:1.5}
 .cutline{align-self:stretch;text-align:center;font-size:11px;color:var(--muted);border-top:1px dashed rgba(255,255,255,.15);padding-top:6px}
+.cutline.soft{opacity:.6;border-top-color:rgba(255,255,255,.1)}
+.tbwrap{position:relative;height:0;flex-shrink:0}
+.tobottom{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);min-height:40px;padding:0 16px;border-radius:20px;background:var(--surface2);color:var(--text);font-size:13px;border:none;box-shadow:0 2px 10px rgba(0,0,0,.35);white-space:nowrap;z-index:2}
 .who{display:flex;align-items:center;gap:6px;font-size:12px;padding-left:4px;margin-bottom:-6px;align-self:flex-start}
 .who i{width:8px;height:8px;border-radius:4px;display:block}
 .gmem{display:flex;align-items:center;gap:12px;min-height:52px;padding:6px 4px;font-size:15px}
@@ -262,7 +267,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.14.2';
+const APP_VERSION = '0.14.3';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -614,11 +619,12 @@ function chatView(cid){
     <div class="title"><div class="tline"><h1>${esc(p.name)}</h1><span class="mini">No.${c.no}</span></div>${chatStat(c, msgs)}</div>
     <span class="mini ${isWarn() ? 'warn' : ''}">今回 ${money(monthUsed())}</span>
     <button class="iconbtn" data-act="chatMenu" aria-label="メニュー" aria-expanded="${S.ui.menu ? 'true' : 'false'}">${ICON.more}</button></div>
-    ${S.ui.menu ? `<div class="menu"><button class="n" data-act="diaryOpen">日記を書いてもらう</button><button data-act="deleteChat" data-id="${c.id}">このチャットを消す</button></div>` : ''}
+    ${S.ui.menu ? `<div class="menu">${c.cutAt ? `<button class="n" data-act="jumpCut">切ったところを見る</button>` : ''}<button class="n" data-act="diaryOpen">日記を書いてもらう</button><button data-act="deleteChat" data-id="${c.id}">このチャットを消す</button></div>` : ''}
     <div class="msgs" id="msgs">`;
   if (!msgs.length && !streaming) h += `<div class="empty">${esc(p.name)}のお部屋。下から話しかけてね</div>`;
   msgs.forEach((m, i) => {
-    if (c.cutAt && i === c.cutAt) h += `<div class="cutline">ここより前は、もう送っていないよ（探せば見つかる）</div>`;
+    if (c.cutAt && i === c.cutAt) h += `<div class="cutline" id="cutline">ここより前は、もう送っていないよ（探せば見つかる）</div>`;
+    else if (c.cutOffer != null && i === c.cutOffer && !streaming) h += `<div class="cutline soft" id="cutmark">切るなら、ここより前（まだ送ってるよ）</div>`;
     const dim = ed != null && i >= ed ? ' dim' : '';
     if (m.role === 'user'){
       h += `<button class="bubble me${dim}" data-act="tapMine" data-i="${i}" data-mi="${i}">${attHtml(m.att)}${fmt(m.text)}</button>`;
@@ -652,8 +658,9 @@ function chatView(cid){
     h += `<div class="bubble ai" id="streamText"${isGroup(p) && S.stream.who ? ` style="background:${memberColor(p, S.stream.who).bg}"` : ''}>${streamShown() ? fmt(streamShown()) : '<span class="dots" aria-label="書いているところ"><i></i><i></i><i></i></span>'}</div>`;
   }
   if (c.cutOffer != null && msgs[c.cutOffer] && !streaming){
-    h += `<div class="cutbox">会話が長くなってきたよ。${shortDate(ymd(new Date(msgs[c.cutOffer].ts)))}のこのあたりより前を、そろそろ送らないようにするね。残したいことがあったら、先に「覚えといて」って頼んでから切ってね。画面からは消えないし、探せば見つかるよ。
-      <div class="btns"><button class="btn" data-act="cutNow">切る</button><button class="btn ghost" data-act="cutLater">あとで</button></div></div>`;
+    const cm = msgs[c.cutOffer];
+    h += `<div class="cutbox">会話が長くなってきたよ。${shortDate(ymd(new Date(cm.ts)))}の「${esc(cutSnippet(cm))}」より前を、そろそろ送らないようにするね。残したいことがあったら、先に「覚えといて」って頼んでから切ってね。画面からは消えないし、探せば見つかるよ。
+      <div class="btns"><button class="btn" data-act="cutNow">切る</button><button class="btn ghost wide" data-act="jumpCut">切れ目を見る</button><button class="btn ghost" data-act="cutLater">あとで</button></div></div>`;
   }
   const memLim = Number(S.settings.memChars) || 4000, memLen = (p.memory || '').length;
   if (!streaming && !S.ui.organizing && memLen > memLim && (!p.memSnooze || memLen > p.memSnooze)){
@@ -680,6 +687,7 @@ function chatView(cid){
   const atts = S.ui.att || [];
   const opts = MODELS.map(m => `<option value="${m[0]}" ${m[0] === p.model ? 'selected' : ''}>${esc(m[3])}</option>`).join('')
     + (priceFor(p.model) ? '' : `<option value="${esc(p.model)}" selected>${esc(p.model)}</option>`);
+  if (S.ui.jumped) h += `<div class="tbwrap"><button class="tobottom" id="toBottom" data-act="toBottom">↓ いちばん下へ</button></div>`;
   h += `<div class="composer"><div class="cbox${composerCompact() ? ' compact' : ''}">
     ${atts.length ? `<div class="atts">${atts.map((a, i) => `<div class="att">${a.kind === 'image' ? `<img src="data:${a.mime};base64,${a.data}" alt="">` : esc(a.name)}<button class="x" data-act="rmAtt" data-i="${i}" aria-label="${esc(a.name)}を外す">×</button></div>`).join('')}</div>` : ''}
     <label for="input" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">メッセージ</label>
@@ -888,7 +896,38 @@ function render(opts = {}){
       else box.scrollTop = box.scrollHeight;
     }
     watchBox(box);
+    if (S.ui.jumped) watchBottom(box);
   }
+}
+// 切れ目に飛んだあと、自分でいちばん下の近くまで戻ったら「いちばん下へ」を消す
+function watchBottom(box){
+  const f = () => {
+    if (box.scrollHeight - box.scrollTop - box.clientHeight > 120) return;
+    S.ui.jumped = false;
+    const b = $('#toBottom'); if (b) b.parentNode.remove();
+    box.removeEventListener('scroll', f);
+  };
+  box.addEventListener('scroll', f, { passive: true });
+}
+// 切れ目の案内に出す、そのメッセージの最初の何文字か
+function cutSnippet(m){
+  const t = String(m.text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return (m.att || []).some(a => a.kind === 'image') ? '（写真）' : '…';
+  return t.length > 24 ? t.slice(0, 24) + '…' : t;
+}
+// 切れ目（切る前の薄い印、または切ったあとの線）まで飛ぶ
+function jumpToCut(){
+  const box = $('#msgs'), el = box && (box.querySelector('#cutmark') || box.querySelector('#cutline'));
+  if (!el) return false;
+  S.ui.userScrolled = true; // このあと自動で位置を合わせない
+  box.scrollTop = Math.max(0, el.offsetTop - 12);
+  if (!S.ui.jumped){
+    S.ui.jumped = true;
+    const top = box.scrollTop;
+    render({ keepScroll: true });
+    const nb = $('#msgs'); if (nb) nb.scrollTop = top;
+  }
+  return true;
 }
 // 送ったメッセージを画面の上に置くための、下の余白の調整
 function layoutAnchor(scroll){
@@ -1993,7 +2032,7 @@ const actions = {
     const um = { role: 'user', text, ts: Date.now() };
     if (atts.length) um.att = atts;
     msgs.push(um);
-    S.ui.draft = ''; S.ui.att = []; S.ui.userActions = null;
+    S.ui.draft = ''; S.ui.att = []; S.ui.userActions = null; S.ui.jumped = false;
     chat(cid).updatedAt = Date.now();
     await saveMsgs(cid); await saveChats();
     runAssistant(cid);
@@ -2089,6 +2128,15 @@ const actions = {
     await saveChats(); render({ keepScroll: true });
   },
   chatMenu(){ S.ui.menu = !S.ui.menu; render({ keepScroll: true }); },
+  jumpCut(){
+    if (S.ui.menu){ S.ui.menu = false; render({ keepScroll: true }); }
+    if (!jumpToCut()) toast('切れ目が見つからなかったよ');
+  },
+  toBottom(){
+    S.ui.jumped = false;
+    render({ keepScroll: true });
+    const box = $('#msgs'); if (box) box.scrollTop = box.scrollHeight;
+  },
   openDrawer(){ S.ui.drawer = true; S.ui.menu = false; render({ keepScroll: true }); },
   closeDrawer(){ S.ui.drawer = false; render({ keepScroll: true }); },
   openModels(){ S.ui.sheet = { type: 'model' }; render({ keepScroll: true }); },
