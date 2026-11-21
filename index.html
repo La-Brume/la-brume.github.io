@@ -185,6 +185,7 @@ textarea.t.small{min-height:120px}
 .kcard input.kdesc{width:100%;margin-top:4px;border:none;border-radius:10px;background:var(--bg);color:var(--text);padding:9px 12px;font:inherit;font-size:14px}
 .kcard.off{opacity:.85}
 .shelflog{font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.7}
+.trfail{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.7;word-break:break-word}
 .kitem{display:flex;align-items:center;gap:8px;background:var(--surface);border-radius:12px;padding:6px 6px 6px 14px;margin-bottom:6px}
 .kitem .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .section{margin-top:28px;padding-top:8px;border-top:1px solid var(--line)}
@@ -267,7 +268,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.14.4';
+const APP_VERSION = '0.14.5';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -519,8 +520,17 @@ function sheetHtml(){
   } else if (sh.type === 'think'){
     title = '考えたこと'; cls = sh.full ? 'full' : '';
     const m = (S.msgs[c.id] || [])[sh.i];
-    const text = !m || !m.think ? '' : ((m.thinkJaV === THINK_TR_VER && !refusedTr(m.thinkJa, m.think) && m.thinkJa) || (isJa(m.think) ? m.think : (sh.err ? '訳せなかったよ。閉じて、もう一度開いてね' : '日本語に訳しているところ…')));
-    body = (m && m.shelf ? `<div class="shelflog">${m.shelf.map(esc).join('<br>')}</div>` : '') + `<div class="thinktext">${esc(text)}</div>`;
+    const good = m && m.think && m.thinkJaV === THINK_TR_VER && !refusedTr(m.thinkJa, m.think) && m.thinkJa;
+    let inner = '';
+    if (!m || !m.think) inner = '';
+    else if (good) inner = `<div class="thinktext">${esc(good)}</div>`;
+    else if (isJa(m.think)) inner = `<div class="thinktext">${esc(m.think)}</div>`;
+    else if (trFailed(m) || sh.err){
+      // だめだったときは、HaikuとSonnetそれぞれの理由を小さく出す。訳しに行くのは「もう一度ためす」を押したときだけ
+      inner = `<div class="thinktext">訳せなかったよ</div>${trFailed(m) ? `<div class="trfail">${m.thinkFail.reasons.map(r => esc(`${r.m}：${trWhy(r)}`)).join('<br>')}</div>` : ''}
+        <button class="btn ghost" data-act="retryTr" style="margin-top:14px">もう一度ためす</button>`;
+    } else inner = `<div class="thinktext">日本語に訳しているところ…</div>`;
+    body = (m && m.shelf ? `<div class="shelflog">${m.shelf.map(esc).join('<br>')}</div>` : '') + inner;
   } else if (sh.type === 'diary'){
     title = '日記を書いてもらう'; cls = 'fit';
     body = diarySheetBody(c, p, sh);
@@ -1333,6 +1343,14 @@ let TR_TIMEOUT = 40000;
 const TR_SYSTEM = 'アリサが自分で使っている個人のアプリで、お部屋のひと（アリサと一緒に過ごしているキャラクター）が返事の前に考えたことを、アリサが読めるように日本語にする役目です。訳すだけをする。';
 // 訳のかわりに断りの文が返ってきたか（元より短くて、断りの言葉が入っている）
 const refusedTr = (ja, src) => !ja || (ja.length < String(src || '').length * 0.3 && /訳せ|翻訳(でき|し|は)|できません|お手伝いでき|申し訳|I can.?t|I cannot|I.?m not able|unable to/i.test(ja));
+// 訳せなかったことを覚えているか（同じ版の訳し方で）
+const trFailed = m => !!(m && m.thinkFail && m.thinkFail.v === THINK_TR_VER && m.thinkFail.reasons && m.thinkFail.reasons.length);
+function trWhy(r){
+  if (r.why === 'empty') return '空っぽで返ってきた';
+  if (r.why === 'refused') return '訳のかわりに断りの文が返ってきた';
+  if (r.why === 'timeout') return `時間切れ（${Math.round((r.sec || TR_TIMEOUT / 1000))}秒待っても返ってこなかった）`;
+  return 'エラー' + (r.detail ? `（${r.detail}）` : '');
+}
 async function trOnce(tr, prompt){
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TR_TIMEOUT);
@@ -1364,15 +1382,29 @@ async function translateThink(cid, i){
 
 ---
 ${m.think}`;
-  let ja = '', lastErr = null;
+  let ja = '';
+  const fails = [];
   for (const tr of TRANSLATORS){
-    try { ja = await trOnce(tr, prompt); if (!refusedTr(ja, m.think)) break; }
-    catch(e){ lastErr = e; }
-    ja = '';
+    const label = modelLabel(tr.model);
+    try {
+      const t = await trOnce(tr, prompt);
+      if (!t) fails.push({ m: label, why: 'empty' });
+      else if (refusedTr(t, m.think)) fails.push({ m: label, why: 'refused' });
+      else { ja = t; break; }
+    } catch(e){
+      if (e.name === 'AbortError') fails.push({ m: label, why: 'timeout', sec: TR_TIMEOUT / 1000 });
+      else fails.push({ m: label, why: 'error', detail: String(e.detail || e.message || '').slice(0, 300) });
+    }
   }
-  if (!ja) throw lastErr || mkErr('訳せなかったよ', '');
+  if (!ja){
+    // だめだったことを覚えておく（開き直しても、自動では訳しに行かない）
+    m.thinkFail = { v: THINK_TR_VER, reasons: fails };
+    await saveMsgs(cid);
+    throw mkErr('訳せなかったよ', '');
+  }
   m.thinkJa = ja;
   m.thinkJaV = THINK_TR_VER;
+  delete m.thinkFail;
   await saveMsgs(cid);
 }
 
@@ -2171,10 +2203,20 @@ const actions = {
     S.ui.sheet = { type: 'think', i, full: false, err: false };
     render({ keepScroll: true });
     const m = S.msgs[cid][i];
-    if (m.think && (m.thinkJaV !== THINK_TR_VER || refusedTr(m.thinkJa, m.think)) && !isJa(m.think)){
+    if (m.think && (m.thinkJaV !== THINK_TR_VER || refusedTr(m.thinkJa, m.think)) && !isJa(m.think) && !trFailed(m)){
       try { await translateThink(cid, i); } catch(e){ if (S.ui.sheet) S.ui.sheet.err = true; }
       if (S.view.name === 'chat' && S.view.id === cid && S.ui.sheet && S.ui.sheet.type === 'think' && S.ui.sheet.i === i) render({ keepScroll: true });
     }
+  },
+  async retryTr(){
+    const sh = S.ui.sheet, cid = S.view.id;
+    if (!sh || sh.type !== 'think') return;
+    const i = sh.i, m = (S.msgs[cid] || [])[i];
+    if (!m || !m.think) return;
+    delete m.thinkFail; sh.err = false;
+    render({ keepScroll: true });
+    try { await translateThink(cid, i); } catch(e){ if (S.ui.sheet) S.ui.sheet.err = true; }
+    if (S.view.name === 'chat' && S.view.id === cid && S.ui.sheet && S.ui.sheet.type === 'think' && S.ui.sheet.i === i) render({ keepScroll: true });
   },
   rmAtt(t){ (S.ui.att || []).splice(Number(t.dataset.i), 1); render({ keepScroll: true }); },
   async copy(t){
