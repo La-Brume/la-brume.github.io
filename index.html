@@ -185,6 +185,9 @@ textarea.t.small{min-height:120px}
 .kcard input.kdesc{width:100%;margin-top:4px;border:none;border-radius:10px;background:var(--bg);color:var(--text);padding:9px 12px;font:inherit;font-size:14px}
 .kcard.off{opacity:.85}
 .shelflog{font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.7}
+.trbar{display:flex;gap:4px;margin:-6px -10px 6px}
+.trbar .act{color:var(--accent)}
+.thinktext.orig{user-select:text;-webkit-user-select:text}
 .trfail{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.7;word-break:break-word}
 .kitem{display:flex;align-items:center;gap:8px;background:var(--surface);border-radius:12px;padding:6px 6px 6px 14px;margin-bottom:6px}
 .kitem .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -268,7 +271,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.14.5';
+const APP_VERSION = '0.14.6';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -519,7 +522,21 @@ function sheetHtml(){
         : `<button class="mrow" data-act="customModel"><span class="grow">ほかのモデル${priceFor(p.model) ? '' : `（${esc(p.model)}）`}</span>${priceFor(p.model) ? ICON.chev : `<span class="ck">${ICON.check}</span>`}</button>`}</div>`;
   } else if (sh.type === 'think'){
     title = '考えたこと'; cls = sh.full ? 'full' : '';
+    body = thinkBody(c, sh);
+  } else if (sh.type === 'diary'){
+    title = '日記を書いてもらう'; cls = 'fit';
+    body = diarySheetBody(c, p, sh);
+  }
+  return `<div class="scrim" data-act="closeSheet"></div>
+    <div class="sheet ${cls}" id="sheet" role="dialog" aria-label="${title}"><div class="grab"></div>
+    <div class="shead"><button class="iconbtn" data-act="closeSheet" aria-label="閉じる">${ICON.x}</button><h2>${title}</h2><span style="width:44px"></span></div>
+    <div class="sbody">${body}</div></div>`;
+}
+// 考えたこと：訳（なければ訳しているところ・訳せなかった）。英語のときは、いつでも原文に切り替えられる（原文のときはコピーも）
+function thinkBody(c, sh){
     const m = (S.msgs[c.id] || [])[sh.i];
+    const en = m && m.think && !isJa(m.think);
+    const bar = en ? `<div class="trbar"><button class="act" data-act="toggleOrig">${sh.orig ? '訳を見る' : '原文を見る'}</button>${sh.orig ? `<button class="act" data-act="copyThink">コピー</button>` : ''}</div>` : '';
     const good = m && m.think && m.thinkJaV === THINK_TR_VER && !refusedTr(m.thinkJa, m.think) && m.thinkJa;
     let inner = '';
     if (!m || !m.think) inner = '';
@@ -530,15 +547,8 @@ function sheetHtml(){
       inner = `<div class="thinktext">訳せなかったよ</div>${trFailed(m) ? `<div class="trfail">${m.thinkFail.reasons.map(r => esc(`${r.m}：${trWhy(r)}`)).join('<br>')}</div>` : ''}
         <button class="btn ghost" data-act="retryTr" style="margin-top:14px">もう一度ためす</button>`;
     } else inner = `<div class="thinktext">日本語に訳しているところ…</div>`;
-    body = (m && m.shelf ? `<div class="shelflog">${m.shelf.map(esc).join('<br>')}</div>` : '') + inner;
-  } else if (sh.type === 'diary'){
-    title = '日記を書いてもらう'; cls = 'fit';
-    body = diarySheetBody(c, p, sh);
-  }
-  return `<div class="scrim" data-act="closeSheet"></div>
-    <div class="sheet ${cls}" id="sheet" role="dialog" aria-label="${title}"><div class="grab"></div>
-    <div class="shead"><button class="iconbtn" data-act="closeSheet" aria-label="閉じる">${ICON.x}</button><h2>${title}</h2><span style="width:44px"></span></div>
-    <div class="sbody">${body}</div></div>`;
+    if (en && sh.orig) inner = `<div class="thinktext orig" lang="en">${esc(m.think)}</div>`;
+    return (m && m.shelf ? `<div class="shelflog">${m.shelf.map(esc).join('<br>')}</div>` : '') + bar + inner;
 }
 // ===== サイドバー =====
 function drawerHtml(){
@@ -2207,6 +2217,20 @@ const actions = {
       try { await translateThink(cid, i); } catch(e){ if (S.ui.sheet) S.ui.sheet.err = true; }
       if (S.view.name === 'chat' && S.view.id === cid && S.ui.sheet && S.ui.sheet.type === 'think' && S.ui.sheet.i === i) render({ keepScroll: true });
     }
+  },
+  toggleOrig(){
+    const sh = S.ui.sheet, c = chat(S.view.id);
+    if (!sh || sh.type !== 'think' || !c) return;
+    sh.orig = !sh.orig;
+    // 画面ごと出し直すとカクッとなるので、中身だけ描き直す
+    const b = $('#sheet .sbody');
+    if (b){ b.innerHTML = thinkBody(c, sh); b.scrollTop = 0; } else render({ keepScroll: true });
+  },
+  async copyThink(){
+    const sh = S.ui.sheet, m = sh && (S.msgs[S.view.id] || [])[sh.i];
+    if (!m || !m.think) return;
+    try { await navigator.clipboard.writeText(m.think); toast('原文をコピーしたよ'); }
+    catch(e){ toast('コピーできなかったよ'); }
   },
   async retryTr(){
     const sh = S.ui.sheet, cid = S.view.id;
