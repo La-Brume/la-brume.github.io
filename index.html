@@ -271,7 +271,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.14.7';
+const APP_VERSION = '0.14.8';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -1350,7 +1350,7 @@ const TRANSLATORS = [
   { model: 'claude-sonnet-5-5', priceIn: 2, priceOut: 10 },
 ];
 let TR_TIMEOUT = 40000;
-const TR_SYSTEM = 'アリサが自分で使っている個人のアプリで、お部屋のひと（アリサと一緒に過ごしているキャラクター）が返事の前に考えたことを、アリサが読めるように日本語にする役目です。訳すだけをする。';
+// 0.14.4〜0.14.7 では訳す側に前置き（system）を渡していたが、渡してから全部断られるようになったので外した（0.14.8）
 // 訳のかわりに断りの文が返ってきたか（元より短くて、断りの言葉が入っている）
 const refusedTr = (ja, src) => !ja || (ja.length < String(src || '').length * 0.3 && /訳せ|翻訳(でき|し|は)|できません|お手伝いでき|申し訳|I can.?t|I cannot|I.?m not able|unable to/i.test(ja));
 // 訳せなかったことを覚えているか（同じ版の訳し方で）
@@ -1374,7 +1374,7 @@ async function trOnce(tr, prompt){
     const res = await fetch(API_URL, {
       method: 'POST', signal: ctrl.signal,
       headers: { 'content-type': 'application/json', 'x-api-key': S.settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: tr.model, max_tokens: 4000, system: TR_SYSTEM, messages: [{ role: 'user', content: prompt }] }),
+      body: JSON.stringify({ model: tr.model, max_tokens: 4000, messages: [{ role: 'user', content: prompt }] }),
     });
     const j = await res.json();
     if (!res.ok) throw mkErr('訳せなかったよ', (j.error && j.error.message) || res.status);
