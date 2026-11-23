@@ -271,7 +271,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.14.6';
+const APP_VERSION = '0.14.7';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -1356,7 +1356,13 @@ const refusedTr = (ja, src) => !ja || (ja.length < String(src || '').length * 0.
 // 訳せなかったことを覚えているか（同じ版の訳し方で）
 const trFailed = m => !!(m && m.thinkFail && m.thinkFail.v === THINK_TR_VER && m.thinkFail.reasons && m.thinkFail.reasons.length);
 function trWhy(r){
-  if (r.why === 'empty') return '空っぽで返ってきた';
+  if (r.why === 'empty'){
+    // 何が返ってきたかを、そのまま出す（stop_reason・書いた量・text 以外の中身の種類）
+    if (r.stop === undefined && r.out === undefined) return '空っぽで返ってきた（くわしい中身は記録していない。もう一度ためすと出る）'; // 0.14.7 より前の記録
+    const bits = [`stop_reason: ${r.stop == null ? 'なし' : r.stop}`, `output_tokens: ${r.out == null ? 'なし' : r.out}`];
+    if (r.kinds && r.kinds.length) bits.push(`text 以外の中身: ${r.kinds.join('、')}`);
+    return `空っぽで返ってきた（${bits.join('／')}）`;
+  }
   if (r.why === 'refused') return '訳のかわりに断りの文が返ってきた';
   if (r.why === 'timeout') return `時間切れ（${Math.round((r.sec || TR_TIMEOUT / 1000))}秒待っても返ってこなかった）`;
   return 'エラー' + (r.detail ? `（${r.detail}）` : '');
@@ -1373,7 +1379,13 @@ async function trOnce(tr, prompt){
     const j = await res.json();
     if (!res.ok) throw mkErr('訳せなかったよ', (j.error && j.error.message) || res.status);
     addCost(tr, j.usage);
-    return (j.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+    const content = Array.isArray(j.content) ? j.content : [];
+    return {
+      text: content.filter(b => b.type === 'text').map(b => b.text).join('').trim(),
+      stop: j.stop_reason == null ? null : j.stop_reason,
+      out: j.usage && j.usage.output_tokens != null ? j.usage.output_tokens : null,
+      kinds: [...new Set(content.filter(b => b.type !== 'text').map(b => String(b.type)))],
+    };
   } finally { clearTimeout(timer); }
 }
 const isJa = t => { const s = String(t || ''); const ja = (s.match(/[\u3040-\u30ff\u4e00-\u9fff]/g) || []).length; return ja > s.length * 0.2; };
@@ -1397,8 +1409,8 @@ ${m.think}`;
   for (const tr of TRANSLATORS){
     const label = modelLabel(tr.model);
     try {
-      const t = await trOnce(tr, prompt);
-      if (!t) fails.push({ m: label, why: 'empty' });
+      const r = await trOnce(tr, prompt), t = r.text;
+      if (!t) fails.push({ m: label, why: 'empty', stop: r.stop, out: r.out, kinds: r.kinds });
       else if (refusedTr(t, m.think)) fails.push({ m: label, why: 'refused' });
       else { ja = t; break; }
     } catch(e){
