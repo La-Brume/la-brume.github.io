@@ -271,7 +271,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.14.8';
+const APP_VERSION = '0.15';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -534,21 +534,17 @@ function sheetHtml(){
 }
 // 考えたこと：訳（なければ訳しているところ・訳せなかった）。英語のときは、いつでも原文に切り替えられる（原文のときはコピーも）
 function thinkBody(c, sh){
-    const m = (S.msgs[c.id] || [])[sh.i];
-    const en = m && m.think && !isJa(m.think);
-    const bar = en ? `<div class="trbar"><button class="act" data-act="toggleOrig">${sh.orig ? '訳を見る' : '原文を見る'}</button>${sh.orig ? `<button class="act" data-act="copyThink">コピー</button>` : ''}</div>` : '';
-    const good = m && m.think && m.thinkJaV === THINK_TR_VER && !refusedTr(m.thinkJa, m.think) && m.thinkJa;
-    let inner = '';
-    if (!m || !m.think) inner = '';
-    else if (good) inner = `<div class="thinktext">${esc(good)}</div>`;
-    else if (isJa(m.think)) inner = `<div class="thinktext">${esc(m.think)}</div>`;
-    else if (trFailed(m) || sh.err){
-      // だめだったときは、HaikuとSonnetそれぞれの理由を小さく出す。訳しに行くのは「もう一度ためす」を押したときだけ
-      inner = `<div class="thinktext">訳せなかったよ</div>${trFailed(m) ? `<div class="trfail">${m.thinkFail.reasons.map(r => esc(`${r.m}：${trWhy(r)}`)).join('<br>')}</div>` : ''}
-        <button class="btn ghost" data-act="retryTr" style="margin-top:14px">もう一度ためす</button>`;
-    } else inner = `<div class="thinktext">日本語に訳しているところ…</div>`;
-    if (en && sh.orig) inner = `<div class="thinktext orig" lang="en">${esc(m.think)}</div>`;
-    return (m && m.shelf ? `<div class="shelflog">${m.shelf.map(esc).join('<br>')}</div>` : '') + bar + inner;
+  // 訳しに行くのはやめた（0.15）。英語のときは英語のまま出して、コピーできるようにする。
+  // 前に訳せて保存してある分（thinkJa）は訳で出し、原文に切り替えられる
+  const m = (S.msgs[c.id] || [])[sh.i];
+  if (!m || !m.think) return '';
+  const good = !isJa(m.think) && m.thinkJaV === THINK_TR_VER && !refusedTr(m.thinkJa, m.think) && m.thinkJa;
+  const showOrig = !good || sh.orig;
+  let bar = '';
+  if (good) bar = `<div class="trbar"><button class="act" data-act="toggleOrig">${sh.orig ? '訳を見る' : '原文を見る'}</button>${sh.orig ? `<button class="act" data-act="copyThink">コピー</button>` : ''}</div>`;
+  else if (!isJa(m.think)) bar = `<div class="trbar"><button class="act" data-act="copyThink">コピー</button></div>`;
+  const inner = showOrig ? `<div class="thinktext${isJa(m.think) ? '' : ' orig" lang="en'}">${esc(m.think)}</div>` : `<div class="thinktext">${esc(good)}</div>`;
+  return (m.shelf ? `<div class="shelflog">${m.shelf.map(esc).join('<br>')}</div>` : '') + bar + inner;
 }
 // ===== サイドバー =====
 function drawerHtml(){
@@ -745,7 +741,7 @@ function settingsView(){
     ${sw('sendDate', '今日の日付', '時間は渡しません', s.sendDate)}</div>
 
     <div class="sec"><h2>表示</h2>
-    ${sw('showThink', '考えたこと', '開いたときだけ日本語に訳します（そのときだけ少しお金がかかります）', s.showThink)}</div>
+    ${sw('showThink', '考えたこと', '英語で考えたときは、英語のまま出します（コピーできます）', s.showThink)}</div>
 
     <div class="sec"><h2>メモリ</h2>
     <label class="f" for="memChars" style="margin-top:0">整理を声かけする長さ（文字）</label>
@@ -1344,91 +1340,10 @@ async function converse(p, msgs, signal, onText, cutAt){
 }
 
 // 考えたことの日本語訳（開いたときだけ、一番安いモデルで）
-// まず Haiku。空っぽで返ってきた・断られた・返ってこない（40秒）・エラーのときは Sonnet で訳し直す
-const TRANSLATORS = [
-  { model: 'claude-haiku-5-5', priceIn: 0.1, priceOut: 0.5 },
-  { model: 'claude-sonnet-5-5', priceIn: 2, priceOut: 10 },
-];
-let TR_TIMEOUT = 40000;
-// 0.14.4〜0.14.7 では訳す側に前置き（system）を渡していたが、渡してから全部断られるようになったので外した（0.14.8）
-// 訳のかわりに断りの文が返ってきたか（元より短くて、断りの言葉が入っている）
+// 前に保存した訳が、訳のかわりの断りの文だったか（それは訳として出さない）
 const refusedTr = (ja, src) => !ja || (ja.length < String(src || '').length * 0.3 && /訳せ|翻訳(でき|し|は)|できません|お手伝いでき|申し訳|I can.?t|I cannot|I.?m not able|unable to/i.test(ja));
-// 訳せなかったことを覚えているか（同じ版の訳し方で）
-const trFailed = m => !!(m && m.thinkFail && m.thinkFail.v === THINK_TR_VER && m.thinkFail.reasons && m.thinkFail.reasons.length);
-function trWhy(r){
-  if (r.why === 'empty'){
-    // 何が返ってきたかを、そのまま出す（stop_reason・書いた量・text 以外の中身の種類）
-    if (r.stop === undefined && r.out === undefined) return '空っぽで返ってきた（くわしい中身は記録していない。もう一度ためすと出る）'; // 0.14.7 より前の記録
-    const bits = [`stop_reason: ${r.stop == null ? 'なし' : r.stop}`, `output_tokens: ${r.out == null ? 'なし' : r.out}`];
-    if (r.kinds && r.kinds.length) bits.push(`text 以外の中身: ${r.kinds.join('、')}`);
-    return `空っぽで返ってきた（${bits.join('／')}）`;
-  }
-  if (r.why === 'refused') return '訳のかわりに断りの文が返ってきた';
-  if (r.why === 'timeout') return `時間切れ（${Math.round((r.sec || TR_TIMEOUT / 1000))}秒待っても返ってこなかった）`;
-  return 'エラー' + (r.detail ? `（${r.detail}）` : '');
-}
-async function trOnce(tr, prompt){
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TR_TIMEOUT);
-  try {
-    const res = await fetch(API_URL, {
-      method: 'POST', signal: ctrl.signal,
-      headers: { 'content-type': 'application/json', 'x-api-key': S.settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: tr.model, max_tokens: 4000, messages: [{ role: 'user', content: prompt }] }),
-    });
-    const j = await res.json();
-    if (!res.ok) throw mkErr('訳せなかったよ', (j.error && j.error.message) || res.status);
-    addCost(tr, j.usage);
-    const content = Array.isArray(j.content) ? j.content : [];
-    return {
-      text: content.filter(b => b.type === 'text').map(b => b.text).join('').trim(),
-      stop: j.stop_reason == null ? null : j.stop_reason,
-      out: j.usage && j.usage.output_tokens != null ? j.usage.output_tokens : null,
-      kinds: [...new Set(content.filter(b => b.type !== 'text').map(b => String(b.type)))],
-    };
-  } finally { clearTimeout(timer); }
-}
 const isJa = t => { const s = String(t || ''); const ja = (s.match(/[\u3040-\u30ff\u4e00-\u9fff]/g) || []).length; return ja > s.length * 0.2; };
 const THINK_TR_VER = 2;
-async function translateThink(cid, i){
-  const m = S.msgs[cid][i];
-  const c = chat(cid), pp = m.who ? persona(m.who) : (c && persona(c.personaId)), who = pp ? pp.name : 'お部屋のひと';
-  const prompt = `次の文章は、${who}（お部屋のひと）が、アリサに返事をする前に考えたことです。自然な日本語に訳してください。
-
-決まり：
-・名前は必ずこの表記にする：Arisa / Alisa → アリサ、Suzu → スズ、Mikage → ミカゲ、Sango → 珊瑚
-・スズ、ミカゲ、珊瑚は男性。アリサは女性
-・名前を漢字に置き換えたり、意味で訳したりしない
-・${who}自身の考えなので、${who}の目線のまま訳す（${who}を他人のように書かない）
-・訳した文章だけを書く
-
----
-${m.think}`;
-  let ja = '';
-  const fails = [];
-  for (const tr of TRANSLATORS){
-    const label = modelLabel(tr.model);
-    try {
-      const r = await trOnce(tr, prompt), t = r.text;
-      if (!t) fails.push({ m: label, why: 'empty', stop: r.stop, out: r.out, kinds: r.kinds });
-      else if (refusedTr(t, m.think)) fails.push({ m: label, why: 'refused' });
-      else { ja = t; break; }
-    } catch(e){
-      if (e.name === 'AbortError') fails.push({ m: label, why: 'timeout', sec: TR_TIMEOUT / 1000 });
-      else fails.push({ m: label, why: 'error', detail: String(e.detail || e.message || '').slice(0, 300) });
-    }
-  }
-  if (!ja){
-    // だめだったことを覚えておく（開き直しても、自動では訳しに行かない）
-    m.thinkFail = { v: THINK_TR_VER, reasons: fails };
-    await saveMsgs(cid);
-    throw mkErr('訳せなかったよ', '');
-  }
-  m.thinkJa = ja;
-  m.thinkJaV = THINK_TR_VER;
-  delete m.thinkFail;
-  await saveMsgs(cid);
-}
 
 // キャッシュ読み込みは入力の何倍か（一覧にないモデルは0.1倍）
 function readMult(model){ const m = MODELS.find(x => x[0] === model); return m && m[1] ? m[4] / m[1] : 0.1; }
@@ -2224,11 +2139,6 @@ const actions = {
     const i = Number(t.dataset.i), cid = S.view.id;
     S.ui.sheet = { type: 'think', i, full: false, err: false };
     render({ keepScroll: true });
-    const m = S.msgs[cid][i];
-    if (m.think && (m.thinkJaV !== THINK_TR_VER || refusedTr(m.thinkJa, m.think)) && !isJa(m.think) && !trFailed(m)){
-      try { await translateThink(cid, i); } catch(e){ if (S.ui.sheet) S.ui.sheet.err = true; }
-      if (S.view.name === 'chat' && S.view.id === cid && S.ui.sheet && S.ui.sheet.type === 'think' && S.ui.sheet.i === i) render({ keepScroll: true });
-    }
   },
   toggleOrig(){
     const sh = S.ui.sheet, c = chat(S.view.id);
@@ -2244,16 +2154,7 @@ const actions = {
     try { await navigator.clipboard.writeText(m.think); toast('原文をコピーしたよ'); }
     catch(e){ toast('コピーできなかったよ'); }
   },
-  async retryTr(){
-    const sh = S.ui.sheet, cid = S.view.id;
-    if (!sh || sh.type !== 'think') return;
-    const i = sh.i, m = (S.msgs[cid] || [])[i];
-    if (!m || !m.think) return;
-    delete m.thinkFail; sh.err = false;
-    render({ keepScroll: true });
-    try { await translateThink(cid, i); } catch(e){ if (S.ui.sheet) S.ui.sheet.err = true; }
-    if (S.view.name === 'chat' && S.view.id === cid && S.ui.sheet && S.ui.sheet.type === 'think' && S.ui.sheet.i === i) render({ keepScroll: true });
-  },
+
   rmAtt(t){ (S.ui.att || []).splice(Number(t.dataset.i), 1); render({ keepScroll: true }); },
   async copy(t){
     const m = S.msgs[S.view.id][Number(t.dataset.i)];
