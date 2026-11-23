@@ -137,7 +137,10 @@ button{font:inherit;color:inherit;cursor:pointer}
 .mchip select{position:absolute;inset:0;width:100%;height:100%;opacity:0;font-size:16px}
 .atts{display:flex;gap:8px;flex-wrap:wrap;padding:2px 2px 8px}
 .att{position:relative;width:64px;height:64px;border-radius:12px;overflow:hidden;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:11px;line-height:1.3;color:var(--muted);text-align:center;padding:4px;word-break:break-all}
-.att img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.att img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;cursor:pointer}
+.imgview{position:fixed;inset:0;z-index:32;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center}
+.imgview img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+.imgview .ivx{position:absolute;top:calc(env(safe-area-inset-top,0px) + 8px);left:8px;color:#fff;background:rgba(0,0,0,.45);border-radius:22px;z-index:1}
 .att .x{position:absolute;top:3px;right:3px;width:24px;height:24px;border-radius:12px;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;padding:0}
 .thinkbtn{align-self:flex-start;margin-bottom:-6px}
 .thinkbox{align-self:flex-start;max-width:88%;border-left:2px solid var(--surface2);padding:2px 0 2px 12px;font-size:13px;line-height:1.7;color:var(--muted);white-space:pre-wrap;word-break:break-word}
@@ -155,7 +158,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .gmem{display:flex;align-items:center;gap:12px;min-height:52px;padding:6px 4px;font-size:15px}
 .gmem input{width:22px;height:22px;accent-color:var(--accent)}
 .bimgs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
-.bimgs img{width:120px;height:120px;object-fit:cover;border-radius:10px;display:block}
+.bimgs img{width:120px;height:120px;object-fit:cover;border-radius:10px;display:block;cursor:pointer}
 .bfile{font-size:12px;color:var(--muted);margin-bottom:4px}
 .editbar+.composer{border-top:none}
 .send{width:40px;height:40px;border-radius:20px;border:none;background:var(--accent);color:var(--onaccent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -271,7 +274,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.15';
+const APP_VERSION = '0.15.1';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -450,8 +453,8 @@ function go(view){
   render();
 }
 window.addEventListener('popstate', async e => {
-  // 日記を閉じたとき：下のチャットはそのまま（読んでいた位置も、書きかけも残す）
-  const dv = document.getElementById('dview');
+  // 日記や写真を閉じたとき：下の画面はそのまま（読んでいた位置も、書きかけも残す）
+  const dv = document.getElementById('imgview') || document.getElementById('dview');
   if (dv){
     dv.remove();
     const st = e.state;
@@ -580,9 +583,11 @@ function groupView(msgs, me){
     return { role: 'user', text: `【${o ? o.name : 'だれか'}】` + m.text };
   });
 }
-function sceneText(g, members, me){
+function sceneText(g, members, me, forDiary){
   const others = members.filter(x => x.id !== me.id).map(x => x.name);
-  return `【いまいる場所】ここは、${others.join('と')}とアリサが一緒にいる部屋（${g.name}）。会話には、アリサの言葉が【アリサ】、${others.map(n => '【' + n + '】').join('・')}としてほかのひとの言葉が届く。自分は${me.name}として、自分の言葉としぐさだけを書く。名前の見出しはつけない。ほかのひとのセリフやしぐさは書かない。ほかのひとの言葉に反応してもいい。言うことがなければ［だまる］とだけ書く。`;
+  // 長さの一文はアリサの言葉のまま（0.15.1）。日記を書くときは長さを縛らないので入れない
+  const short = forDiary ? '' : 'ここでは、ひとりと話すときより短くしてね。受け取ったことには触れていいけど、軽く一言で足りるものは一言でいいし、自分が言いたいことはそのままでね。ほかのひとがもう返したことは、くり返さなくていいよ。';
+  return `【いまいる場所】ここは、${others.join('と')}とアリサが一緒にいる部屋（${g.name}）。会話には、アリサの言葉が【アリサ】、${others.map(n => '【' + n + '】').join('・')}としてほかのひとの言葉が届く。自分は${me.name}として、自分の言葉としぐさだけを書く。名前の見出しはつけない。ほかのひとのセリフやしぐさは書かない。ほかのひとの言葉に反応してもいい。言うことがなければ［だまる］とだけ書く。${short}`;
 }
 const nameVariants = m => [m.name, m.name.replace(/(さん|くん|ちゃん)$/, ''), m.initial].filter(x => x && x.length);
 function groupOrder(c, members, text){
@@ -621,7 +626,7 @@ function attHtml(att){
   if (!att || !att.length) return '';
   const imgs = att.filter(a => a.kind === 'image');
   const files = att.filter(a => a.kind !== 'image');
-  return (imgs.length ? `<span class="bimgs">${imgs.map(a => `<img src="data:${a.mime};base64,${a.data}" alt="">`).join('')}</span>` : '')
+  return (imgs.length ? `<span class="bimgs">${imgs.map(a => `<img src="data:${a.mime};base64,${a.data}" alt="写真" data-act="viewImg">`).join('')}</span>` : '')
     + files.map(a => `<span class="bfile" style="display:block">ファイル：${esc(a.name)}</span>`).join('');
 }
 function chatView(cid){
@@ -705,7 +710,7 @@ function chatView(cid){
     + (priceFor(p.model) ? '' : `<option value="${esc(p.model)}" selected>${esc(p.model)}</option>`);
   if (S.ui.jumped) h += `<div class="tbwrap"><button class="tobottom" id="toBottom" data-act="toBottom">↓ いちばん下へ</button></div>`;
   h += `<div class="composer"><div class="cbox${composerCompact() ? ' compact' : ''}">
-    ${atts.length ? `<div class="atts">${atts.map((a, i) => `<div class="att">${a.kind === 'image' ? `<img src="data:${a.mime};base64,${a.data}" alt="">` : esc(a.name)}<button class="x" data-act="rmAtt" data-i="${i}" aria-label="${esc(a.name)}を外す">×</button></div>`).join('')}</div>` : ''}
+    ${atts.length ? `<div class="atts">${atts.map((a, i) => `<div class="att">${a.kind === 'image' ? `<img src="data:${a.mime};base64,${a.data}" alt="${esc(a.name)}" data-act="viewImg">` : esc(a.name)}<button class="x" data-act="rmAtt" data-i="${i}" aria-label="${esc(a.name)}を外す">×</button></div>`).join('')}</div>` : ''}
     <label for="input" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">メッセージ</label>
     <textarea id="input" rows="1" placeholder="メッセージ"></textarea>
     <div class="crow">
@@ -1535,7 +1540,7 @@ function dayText(days){
 // 本人の目線：みんなの部屋なら部屋のモデルで、その場所のことも渡す
 function diaryEff(room, writer){
   if (!isGroup(room)) return room;
-  return Object.assign({}, writer, { model: room.model, priceIn: room.priceIn, priceOut: room.priceOut, think: room.think !== false, _scene: sceneText(room, groupMembers(room), writer) });
+  return Object.assign({}, writer, { model: room.model, priceIn: room.priceIn, priceOut: room.priceOut, think: room.think !== false, _scene: sceneText(room, groupMembers(room), writer, true) });
 }
 function diaryDays(msgs){
   const map = new Map();
@@ -1973,6 +1978,19 @@ async function openDiaryView(cid, i){
   document.body.appendChild(v);
   history.pushState(Object.assign({}, S.view, { dv: 1 }), '');
 }
+// 写真を大きく見る（×かスマホの戻るボタンで閉じる。下の画面はそのまま）
+function openImgView(src){
+  if (!src || document.getElementById('imgview')) return;
+  const v = document.createElement('div');
+  v.id = 'imgview'; v.className = 'imgview'; v.setAttribute('role', 'dialog'); v.setAttribute('aria-label', '写真');
+  v.innerHTML = `<button class="iconbtn ivx" data-iv="close" aria-label="閉じる">${ICON.x}</button>`;
+  const img = document.createElement('img');
+  img.alt = '写真'; img.src = src;
+  v.appendChild(img);
+  v.addEventListener('click', e => { if (e.target.closest('[data-iv="close"]')) history.back(); });
+  document.body.appendChild(v);
+  history.pushState(Object.assign({}, S.view, { iv: 1 }), '');
+}
 function downloadBlob(blob, name, msg){
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -2155,6 +2173,7 @@ const actions = {
     catch(e){ toast('コピーできなかったよ'); }
   },
 
+  viewImg(t){ openImgView(t.getAttribute('src')); },
   rmAtt(t){ (S.ui.att || []).splice(Number(t.dataset.i), 1); render({ keepScroll: true }); },
   async copy(t){
     const m = S.msgs[S.view.id][Number(t.dataset.i)];
