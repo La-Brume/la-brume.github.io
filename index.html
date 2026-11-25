@@ -274,7 +274,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.15.1';
+const APP_VERSION = '0.15.2';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -327,7 +327,12 @@ function periodStart(d = new Date()){
   return { y, m, cd };
 }
 function periodKey(d = new Date()){ const p = periodStart(d); return `${p.y}-${pad2(p.m + 1)}`; }
-function periodLabel(){ const p = periodStart(); return `${p.m + 1}/${p.cd}〜`; }
+function periodLabel(){
+  // 途中で0にもどしたときは、その日から（usageResetAt。同じ区切りの中だけ）
+  const at = S.settings && S.settings.usageResetAt;
+  if (at && periodKey(new Date(at)) === periodKey()){ const d = new Date(at); return `${d.getMonth() + 1}/${d.getDate()}〜`; }
+  const p = periodStart(); return `${p.m + 1}/${p.cd}〜`;
+}
 const money = n => '$' + (n || 0).toFixed(2);
 // 空行で段落に分けて表示する（空行がそのまま大きなすき間にならないように）
 // （）の中（しぐさ）は少し薄い色にする
@@ -763,7 +768,9 @@ function settingsView(){
     <input class="t" id="cap" type="number" inputmode="decimal" min="1" value="${esc(s.monthlyCap)}" data-change="cap"></div>
     <div><label class="f" for="cycleDay" style="margin-top:0">区切りの日</label>
     <input class="t" id="cycleDay" type="number" inputmode="numeric" min="1" max="28" value="${esc(s.cycleDay)}" data-change="cycleDay"></div></div>
-    <div class="hint">8割を超えると色が変わります（止めはしません）。区切りの日は、クレジットの請求期間に合わせます（今は${periodLabel()}）。金額はアプリの見積もりです。</div></div>
+    <div class="hint">8割を超えると色が変わります（止めはしません）。区切りの日は、クレジットの請求期間に合わせます（今は${periodLabel()}）。金額はアプリの見積もりです。</div>
+    <button class="btn ghost" data-act="resetUsage" style="margin-top:14px">今回の金額を0にもどす（今は${money(monthUsed())}）</button>
+    <div class="hint">前のクレジットが期限切れになったときなどに。開発者サイトの記録は消えません。</div></div>
 
     <button class="btn" data-act="saveAll" style="margin-top:28px">保存する</button>
 
@@ -2173,6 +2180,13 @@ const actions = {
     catch(e){ toast('コピーできなかったよ'); }
   },
 
+  async resetUsage(){
+    const k = periodKey(), now = S.usage[k] || 0;
+    if (!confirm(`今回の金額（${money(now)}）を0にもどす？開発者サイトの記録は消えないよ。`)) return;
+    S.usage[k] = 0; await saveUsage();
+    S.settings.usageResetAt = Date.now(); await saveSettings();
+    toast('今回の金額を0にもどしたよ'); render({ keepScroll: true });
+  },
   viewImg(t){ openImgView(t.getAttribute('src')); },
   rmAtt(t){ (S.ui.att || []).splice(Number(t.dataset.i), 1); render({ keepScroll: true }); },
   async copy(t){
