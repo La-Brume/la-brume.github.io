@@ -276,7 +276,7 @@ input.switch:checked::before{transform:translateX(20px);background:var(--onaccen
 'use strict';
 
 /* ===== 基本設定 ===== */
-const APP_VERSION = '0.15.4';
+const APP_VERSION = '0.15.6';
 const BACKUP_FORMAT = 1;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_TOKENS = 32000;
@@ -585,7 +585,7 @@ const whoHtml = (g, id) => { const m = persona(id), c = memberColor(g, id); retu
 function groupView(msgs, me){
   return msgs.map(m => {
     if (m.role === 'user') return { role: 'user', text: '【アリサ】' + (m.text || ''), att: m.att };
-    if (m.who === me.id) return { role: 'assistant', text: m.text, shelf: m.shelf };
+    if (m.who === me.id) return { role: 'assistant', text: m.text, shelf: m.shelf, memLog: m.memLog, memUndone: m.memUndone };
     const o = persona(m.who);
     return { role: 'user', text: `【${o ? o.name : 'だれか'}】` + m.text };
   });
@@ -1052,13 +1052,15 @@ function toast(msg){
 /* ===== Claudeに送る ===== */
 
 // メモリの道具。みんなが「頼まれたときだけ」使う
+// メモリを書いたあとの見え方（0.15.5 の控えのため。アリサが頼んだ文のまま。memory_add と memory_replace の説明に入れる）
+const MEMORY_LATER = '書いたことは、しばらくのあいだメモリの欄には出てこない。かわりに、次のアリサのメッセージの頭に、アプリが『（アプリから：前の返事のときに、メモリに「〇〇」と書き足した）』のような一行を添える。これはアプリが自動でつけている事実の一行で、ちゃんと書けている。メモリの欄にないからといって、書き直さなくていい。';
 const MEMORY_RULES = 'メモリの書き方：言葉は自分の声で書く（事務的にそろえない）。出来事は全部は残さない。ただし約束など、この先に関わる大事な出来事は残す。変化は必ず残し、「こうしてね→わかった」で終わらせず、何がどう変わったかまで書く。古くなったことは書き足さずに書き換える。その場限りのことや推測は入れない。';
 const TOOLS = [
   { name: 'memory_add',
-    description: '自分のメモリに書き足す。メモリのことは毎回考えなくていい。いちばん大事なのは目の前の会話。はっきりした約束や、関係や暮らしの大きな変化が出てきたときだけ、自分の判断で書いていい。迷ったら書かない。ひとつの会話で何度も書かない。アリサに「覚えといて」と言われたら必ず書く。すでに書いてあることの更新なら memory_replace を使う。' + MEMORY_RULES,
+    description: '自分のメモリに書き足す。メモリのことは毎回考えなくていい。いちばん大事なのは目の前の会話。はっきりした約束や、関係や暮らしの大きな変化が出てきたときだけ、自分の判断で書いていい。迷ったら書かない。ひとつの会話で何度も書かない。アリサに「覚えといて」と言われたら必ず書く。すでに書いてあることの更新なら memory_replace を使う。' + MEMORY_LATER + MEMORY_RULES,
     input_schema: { type: 'object', properties: { text: { type: 'string', description: '書き足す内容' } }, required: ['text'] } },
   { name: 'memory_replace',
-    description: '自分のメモリの一部を書きかえる（すでに書いてあることに変化があったとき）。使いどきと書き方は memory_add と同じ。',
+    description: '自分のメモリの一部を書きかえる（すでに書いてあることに変化があったとき）。使いどきと書き方は memory_add と同じ。' + MEMORY_LATER,
     input_schema: { type: 'object', properties: { old_text: { type: 'string', description: 'メモリにある、書きかえたい文（そのまま写す）' }, new_text: { type: 'string', description: '新しい文' } }, required: ['old_text', 'new_text'] } },
   { name: 'search_past',
     description: '自分のお部屋と、自分が入っているみんなの部屋の過去の会話から、言葉で探す。アリサに「前に話したあれ」と言われたときや、覚えていない昔の話が出てきたときに使う。見つかったところの前後が少しだけ返ってくる。'
@@ -1164,6 +1166,7 @@ function toApiMessages(msgs){
     const blocks = [];
     if (m.role === 'user' && used.length){ blocks.push({ type: 'text', text: `（アプリから：前の返事のときに、${used.join('。')}）` }); used = []; }
     if (m.role === 'assistant' && m.shelf && m.shelf.length) used.push(...m.shelf);
+    if (m.role === 'assistant' && m.memLog && !m.memUndone) used.push(...m.memLog);
     (m.att || []).forEach((a, j) => {
       if (a.kind === 'text') blocks.push({ type: 'text', text: `【添付ファイル：${a.name}】\n${a.text}` });
       else if (!keep.has(i + ':' + j)) blocks.push({ type: 'text', text: `（ここに${a.kind === 'image' ? '写真' : 'PDF'}「${a.name}」があった。古いので、今はもう見えない）` });
@@ -1180,7 +1183,7 @@ function toApiMessages(msgs){
   return out;
 }
 
-function buildSystem(p, cc){
+function buildSystem(p, cc, memText){
   // 並び順：個人設定 → カスタム指示 → ナレッジ → メモリ（変わらないものほど前）
   const system = [];
   const prefs = (S.settings.userPrefs || '').trim();
@@ -1194,7 +1197,7 @@ function buildSystem(p, cc){
   if (p._scene) system.push({ type: 'text', text: p._scene });
   // メモリの手前にもキャッシュの印。メモリが書きかわっても、ここまでは読み直しで済む
   if (system.length) system[system.length - 1].cache_control = cc;
-  const mem = (p.memory || '').trim();
+  const mem = (memText != null ? memText : (p.memory || '')).trim();
   system.push({ type: 'text', text: `【${p.name}のメモリ（自分で書いたもの）】\n${mem || '（まだ何も書いていない）'}` });
   // ここまでをキャッシュ
   system[system.length - 1].cache_control = cc;
@@ -1203,11 +1206,34 @@ function buildSystem(p, cc){
   return system;
 }
 
+// メモリを書くたびに会話まるごとのキャッシュを書き直さないための控え（0.15.5）
+// 話しているあいだに本人が書き足した・書きかえたメモリは、system のメモリはそのままにして、次のメッセージの頭に一行で伝える（m.memLog）。
+// system のメモリを今のものに入れかえるのは、どうせ全部書き直しになるとき（前のやりとりから1時間以上あいた・会話を切った）と、
+// 本人が知らない変わり方をしたとき（ほかの部屋で書いた・アリサが設定で直した・整理した・取り消した・作り直した など）だけ。
+// c.sysMem[だれ] = { mem: system に入れているメモリ, known: 本人が知っているメモリ（system＋一行）, at: 最後に頼んだ時刻, cut: そのときの切ったところ }
+function sysMemFor(c, p, ttl){
+  const now = Date.now(), cur = p.memory || '', cut = c.cutAt || 0;
+  for (const x of S.chats) if (x.sysMem) for (const k of Object.keys(x.sysMem)) if (now - x.sysMem[k].at > 2 * 3600000) delete x.sysMem[k];
+  c.sysMem = c.sysMem || {};
+  const s = c.sysMem[p.id];
+  const warm = s && now - s.at < (ttl ? 60 : 5) * 60000 && s.cut === cut && s.known === cur;
+  const mem = warm ? s.mem : cur;
+  c.sysMem[p.id] = { mem, known: cur, at: now, cut };
+  return mem;
+}
+// 返事でメモリを書き足した・書きかえたら、その返事に一行を残して、本人が知っているメモリを進める（整理が入ったときは残さない＝入れかえる）
+function noteMemLog(c, p, m, ops, before){
+  if (!ops || !ops.length || ops.some(o => o.type !== 'add' && o.type !== 'replace')) return;
+  m.memLog = ops.map(o => o.type === 'add' ? `メモリに「${o.text}」と書き足した` : `メモリの「${o.old}」を「${o.new}」に書きかえた`);
+  const s = c.sysMem && c.sysMem[p.id];
+  if (s && s.known === before) s.known = p.memory || '';
+}
+
 function buildBody(p, apiMsgs, o){
   const cc = o.ttl ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
   // system は、ひとつの返事のあいだ（道具を使って何回か往復するあいだ）は最初に作ったものをそのまま使う。
   // 途中でメモリが書きかわっても作り直さない（考えた部分の署名が最初の system に結びついていて、変えるとエラーになるため）
-  if (!o.sysCache || o.sysCache.ttl !== o.ttl) o.sysCache = { ttl: o.ttl, sys: JSON.stringify(buildSystem(p, cc)) };
+  if (!o.sysCache || o.sysCache.ttl !== o.ttl) o.sysCache = { ttl: o.ttl, sys: JSON.stringify(buildSystem(p, cc, o.memText)) };
   const system = JSON.parse(o.sysCache.sys);
 
   // 会話の最後にだけキャッシュの印（次の返事でそこまでを読み直せる）
@@ -1319,10 +1345,11 @@ async function callClaude(p, apiMsgs, signal, onText, usage, o){
 }
 
 // 返事をもらう。メモリの道具が使われたら、結果を返してもう一度（最大4回）
-async function converse(p, msgs, signal, onText, cutAt){
+async function converse(p, msgs, signal, onText, cutAt, c){
   const apiMsgs = toApiMessages(cutAt ? msgs.slice(cutAt) : msgs);
   if (cutAt && apiMsgs.length) apiMsgs[0].content.unshift({ type: 'text', text: '（ここより前の会話は、長くなったので省いてある。必要なら search_past で探せる）' });
   const o = { ttl: true, think: p.think !== false, display: true, cacheIdx: apiMsgs.length - 1 };
+  if (c) o.memText = sysMemFor(c, p, true);
   let shown = '', thoughts = '';
   const notes = [], logs = [], ops = [];
   for (let round = 0; round < 4; round++){
@@ -1337,6 +1364,7 @@ async function converse(p, msgs, signal, onText, cutAt){
       throw e;
     }
     addCost(p, usage);
+    if (c && c.sysMem && c.sysMem[p.id]) c.sysMem[p.id].at = Date.now();
     if (r.text.trim()) shown += sep + r.text;
     const th = r.blocks.filter(b => b.type === 'thinking' && b.thinking).map(b => b.thinking).join('\n\n');
     if (th) thoughts += (thoughts ? '\n\n' : '') + th;
@@ -1439,7 +1467,8 @@ async function runGroup(cid, skip){
     nextFrame(pump);
     let stop = false;
     try {
-      const r = await converse(eff, groupView(msgs, mem), S.stream.ctrl.signal, t => { if (S.stream) S.stream.text = t; }, c.cutAt || 0);
+      const before = mem.memory || '';
+      const r = await converse(eff, groupView(msgs, mem), S.stream.ctrl.signal, t => { if (S.stream) S.stream.text = t; }, c.cutAt || 0, c);
       if (S.stream){
         S.stream.done = true;
         await Promise.race([
@@ -1456,6 +1485,7 @@ async function runGroup(cid, skip){
         if (r.ops && r.ops.length) m.memOps = r.ops;
         if (r.thoughts) m.think = r.thoughts;
         if (r.logs && r.logs.length) m.shelf = r.logs;
+        noteMemLog(c, mem, m, r.ops, before);
         msgs.push(m);
       }
     } catch (e){
@@ -1489,7 +1519,8 @@ async function runAssistant(cid){
   render({ anchor: true });
   nextFrame(pump);
   try {
-    const r = await converse(p, msgs, S.stream.ctrl.signal, t => { if (S.stream) S.stream.text = t; }, c.cutAt || 0);
+    const before = p.memory || '';
+    const r = await converse(p, msgs, S.stream.ctrl.signal, t => { if (S.stream) S.stream.text = t; }, c.cutAt || 0, c);
     // 流しきるのを待つ（アプリが裏にいて画面が止まっていても、4秒で先に進む）
     if (S.stream){
       S.stream.done = true;
@@ -1505,6 +1536,7 @@ async function runAssistant(cid){
       if (r.ops && r.ops.length) m.memOps = r.ops;
       if (r.thoughts) m.think = r.thoughts;
       if (r.logs && r.logs.length) m.shelf = r.logs;
+      noteMemLog(c, p, m, r.ops, before);
       msgs.push(m);
     } else {
       if (r.notes.length) toast(r.notes.join('・'));
